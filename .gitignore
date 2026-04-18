@@ -29,9 +29,8 @@ pnpm-debug.log*
 
 # Large GLBs — host on Arweave / IPFS / R2 / Blob / CDN and point env vars at the public URL.
 # See .env.example: PUBLIC_HOODRATS_MODEL_URL, PUBLIC_UR_WORLD_MODEL_URL, PUBLIC_PORTAL_MODEL_URL.
-public/models/hoodrat.glb
+# Large binaries — prefer Arweave/R2 + PUBLIC_*_MODEL_URL; or commit only if under GitHub size limits.
 public/models/hoodrats.glb
 public/models/ur-2-version-2.glb
-# Split glTF pack (hoodrat_0.bin > GitHub 100MB limit) — use hoodrats.glb + PUBLIC_HOODRATS_MODEL_URL or LFS locally
+# Split glTF pack (hoodrat_0.bin can exceed GitHub limits) — use hoodrats.glb + PUBLIC_HOODRATS_MODEL_URL or LFS locally
 public/models/hoodrat/
-public/models/world/ur2.glb

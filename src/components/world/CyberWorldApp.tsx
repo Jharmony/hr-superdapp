@@ -9,6 +9,7 @@ import { Canvas } from '@react-three/fiber';
 import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import { AppErrorBoundary } from '../AppErrorBoundary';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
 import { GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
@@ -329,7 +330,20 @@ export function CyberWorldApp() {
       </div>
 
       <div className="h-full w-full pt-14 md:pt-0">
-        <WorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+        <AppErrorBoundary
+          layout="immersive"
+          title="Cyber district 3D could not load"
+          hint={
+            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
+              The Hoodrat and/or portal GLB failed to load. Set{' '}
+              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> and{' '}
+              <code className="text-lime-200/90">PUBLIC_PORTAL_MODEL_URL</code> to HTTPS URLs (for example
+              Arweave), or include the files under <code className="text-zinc-200">public/models/</code>.
+            </p>
+          }
+        >
+          <WorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+        </AppErrorBoundary>
       </div>
 
       <div
@@ -347,5 +361,3 @@ export function CyberWorldApp() {
     </div>
   );
 }
-
-useGLTF.preload(PORTAL_MODEL_URL);

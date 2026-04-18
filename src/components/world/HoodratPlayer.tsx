@@ -407,4 +407,3 @@ export function HoodratPlayer({
   );
 }
 
-useGLTF.preload(MODEL_URL);

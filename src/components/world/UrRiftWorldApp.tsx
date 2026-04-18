@@ -1,5 +1,6 @@
 import { Environment, Html, KeyboardControls, useGLTF } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
+import { AppErrorBoundary } from '../AppErrorBoundary';
 import {
   Suspense,
   useCallback,
@@ -474,7 +475,20 @@ export function UrRiftWorldApp() {
       </div>
 
       <div className="h-full w-full pt-14 md:pt-0">
-        <UrWorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+        <AppErrorBoundary
+          layout="immersive"
+          title="UR rift world could not load"
+          hint={
+            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
+              The rift map and/or Hoodrat GLB failed to load. Set{' '}
+              <code className="text-lime-200/90">PUBLIC_UR_WORLD_MODEL_URL</code> and{' '}
+              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> to HTTPS URLs, or ship the
+              files under <code className="text-zinc-200">public/models/</code>.
+            </p>
+          }
+        >
+          <UrWorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+        </AppErrorBoundary>
       </div>
 
       <div
@@ -490,5 +504,3 @@ export function UrRiftWorldApp() {
     </div>
   );
 }
-
-useGLTF.preload(UR_WORLD_MODEL_URL);

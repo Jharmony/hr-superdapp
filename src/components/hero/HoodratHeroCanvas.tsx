@@ -339,5 +339,3 @@ export function HoodratHeroCanvas() {
     </div>
   );
 }
-
-useGLTF.preload(MODEL_URL);

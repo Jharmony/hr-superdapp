@@ -7,6 +7,7 @@ import {
 } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { Suspense, useEffect, useMemo } from 'react';
+import { AppErrorBoundary } from '../AppErrorBoundary';
 import type { AnimationClip } from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
@@ -93,54 +94,65 @@ export function TraitHoodratPreview({
 
   return (
     <div className={wrapClass}>
-      <Canvas
-        className="!h-full !w-full"
-        shadows
-        camera={{
-          position: [0, 1.72, 6.82],
-          fov: 38,
-          near: 0.015,
-          far: 200,
-        }}
-        dpr={dpr}
-        gl={{
-          alpha: true,
-          antialias: true,
-          powerPreference: 'high-performance',
-          logarithmicDepthBuffer: true,
-        }}
+      <AppErrorBoundary
+        layout="inline"
+        title="Trait 3D preview unavailable"
+        hint={
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+            Set <code className="text-lime-200/80">PUBLIC_HOODRATS_MODEL_URL</code> or add{' '}
+            <code className="text-zinc-300">hoodrats.glb</code> under <code className="text-zinc-300">public/models/</code>.
+          </p>
+        }
       >
-        <Suspense
-          fallback={
-            <Html center>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/90 px-4 py-3 text-xs text-zinc-400">
-                Loading 3D…
-              </div>
-            </Html>
-          }
+        <Canvas
+          className="!h-full !w-full"
+          shadows
+          camera={{
+            position: [0, 1.72, 6.82],
+            fov: 38,
+            near: 0.015,
+            far: 200,
+          }}
+          dpr={dpr}
+          gl={{
+            alpha: true,
+            antialias: true,
+            powerPreference: 'high-performance',
+            logarithmicDepthBuffer: true,
+          }}
         >
-          <color attach="background" args={['#09090b']} />
-          <ambientLight intensity={0.38} />
-          <directionalLight
-            position={[4.5, 7, 3.5]}
-            intensity={1.15}
-            castShadow
-            shadow-mapSize={[1024, 1024]}
-            shadow-bias={-0.0002}
-          />
-          <directionalLight
-            position={[-3.2, 2.4, -2]}
-            intensity={0.32}
-            color="#c8f7a0"
-          />
-          <Environment preset="city" />
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.05, 0]} receiveShadow>
-            <planeGeometry args={[12, 12]} />
-            <shadowMaterial opacity={0.35} />
-          </mesh>
-          <TraitHoodratScene attributes={attributes} />
-        </Suspense>
-      </Canvas>
+          <Suspense
+            fallback={
+              <Html center>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/90 px-4 py-3 text-xs text-zinc-400">
+                  Loading 3D…
+                </div>
+              </Html>
+            }
+          >
+            <color attach="background" args={['#09090b']} />
+            <ambientLight intensity={0.38} />
+            <directionalLight
+              position={[4.5, 7, 3.5]}
+              intensity={1.15}
+              castShadow
+              shadow-mapSize={[1024, 1024]}
+              shadow-bias={-0.0002}
+            />
+            <directionalLight
+              position={[-3.2, 2.4, -2]}
+              intensity={0.32}
+              color="#c8f7a0"
+            />
+            <Environment preset="city" />
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.05, 0]} receiveShadow>
+              <planeGeometry args={[12, 12]} />
+              <shadowMaterial opacity={0.35} />
+            </mesh>
+            <TraitHoodratScene attributes={attributes} />
+          </Suspense>
+        </Canvas>
+      </AppErrorBoundary>
     </div>
   );
 }
