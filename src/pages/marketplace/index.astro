@@ -1,0 +1,11 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { MarketplaceApp } from '../../components/marketplace/MarketplaceApp';
+---
+
+<Layout
+  title="Marketplace — Hoodrats"
+  description="Browse Hoodrats listings (aggregated). Buy on OpenSea; list from OpenSea or My Hoodrats."
+>
+  <MarketplaceApp client:only="react" />
+</Layout>

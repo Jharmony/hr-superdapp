@@ -1,0 +1,37 @@
+# build output
+dist/
+# generated types
+.astro/
+
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment — never commit secrets. Set the same keys in Vercel → Project → Settings → Environment Variables.
+.env
+.env.*
+!.env.example
+.env.local
+
+# Vercel CLI local link
+.vercel/
+
+# macOS-specific files
+.DS_Store
+
+# jetbrains setting folder
+.idea/
+
+# Large GLBs — host on Arweave / IPFS / R2 / Blob / CDN and point env vars at the public URL.
+# See .env.example: PUBLIC_HOODRATS_MODEL_URL, PUBLIC_UR_WORLD_MODEL_URL, PUBLIC_PORTAL_MODEL_URL.
+public/models/hoodrat.glb
+public/models/hoodrats.glb
+public/models/ur-2-version-2.glb
+# Split glTF pack (hoodrat_0.bin > GitHub 100MB limit) — use hoodrats.glb + PUBLIC_HOODRATS_MODEL_URL or LFS locally
+public/models/hoodrat/
+public/models/world/ur2.glb

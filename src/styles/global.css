@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/**
+ * Bottom padding on `<footer>` (and fallback) so the page can scroll past the fixed
+ * mint dock. `MintSection` lowers this when the dock is minimized.
+ */
+:root {
+  --mint-dock-scroll-pad: 5.5rem;
+}

@@ -1,0 +1,38 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { RatPrerenderedDetailPage } from '../../components/hoodrats/RatPrerenderedDetailPage';
+import {
+  createMetadataPublicClient,
+  fetchTokenMetadata,
+} from '../../lib/metadata';
+import { resolveUri } from '../../lib/uri';
+
+export const prerender = true;
+
+export async function getStaticPaths() {
+  const n = Number(import.meta.env.PUBLIC_STATIC_RAT_COUNT || 50);
+  const safe = Math.min(Math.max(1, n), 5000);
+  return Array.from({ length: safe }, (_, i) => ({
+    params: { id: String(i + 1) },
+  }));
+}
+
+const id = Number(Astro.params.id);
+const client = createMetadataPublicClient();
+const meta = await fetchTokenMetadata(client, id);
+const anim = meta?.animation_url?.trim();
+const img = meta?.image ? resolveUri(meta.image) : undefined;
+const title = meta?.name ?? `HOODRAT #${id}`;
+---
+
+<Layout {title}>
+  <RatPrerenderedDetailPage
+    client:only="react"
+    tokenId={id}
+    title={title}
+    description={meta?.description}
+    anim={anim}
+    img={img}
+    attributes={meta?.attributes}
+  />
+</Layout>

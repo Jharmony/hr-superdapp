@@ -1,0 +1,11 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { CyberWorldApp } from '../../components/world/CyberWorldApp';
+---
+
+<Layout
+  title="HOOD-420PJ — Cyber district"
+  description="Explore a neon Hoodrats cyber district in your browser."
+>
+  <CyberWorldApp client:only="react" />
+</Layout>

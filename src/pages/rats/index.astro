@@ -1,0 +1,16 @@
+---
+/**
+ * Query-string token viewer: `/rats/?id=324`
+ * `?id` is read on the client — at static build time Astro has no search params,
+ * so RatDetailApp parses `window.location` (see RatDetailApp.tsx).
+ */
+import Layout from '../../layouts/Layout.astro';
+import { RatDetailApp } from '../../components/hoodrats/RatDetailApp';
+---
+
+<Layout
+  title="View Hoodrat"
+  description="Hoodrats token viewer — Ethereum mainnet."
+>
+  <RatDetailApp client:only="react" />
+</Layout>

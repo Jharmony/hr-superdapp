@@ -1,0 +1,4618 @@
+# Three Blocks - Complete API Documentation
+
+> GPU-accelerated simulation and rendering toolkit for Three.js WebGPU
+
+This file contains the complete API reference for Three Blocks.
+For a lightweight navigation index, see: https://three-blocks.com/llms.txt
+
+## Installation
+
+```bash
+npm install @three-blocks/core
+```
+
+```js
+import * as THREE from 'three/webgpu';
+import { Boids, SPH, Text, IndirectBatchedMesh } from '@three-blocks/core';
+```
+
+## LLM Guide
+
+Purpose: help LLMs generate correct integrations for Three Blocks Core
+GPU compute, simulation, and rendering helpers.
+
+## Requirements (must-haves)
+
+- Three.js r182+ with WebGPU; import from `three/webgpu`.
+- WebGPURenderer for compute/simulation/culling classes; some Text/TSL
+  utilities can run on WebGL but WebGPU is the default.
+- Call `await renderer.init()` before the first compute/step.
+- WebGPU-capable browser.
+
+## Canonical setup order (do this sequence)
+
+1. Create `WebGPURenderer`, scene, camera.
+2. `await renderer.init()`.
+3. Create core systems (Boids/SPH/PBF, ComputeSDFGenerator, Text, IndirectBatchedMesh).
+4. In the render loop: run compute/step updates, then render.
+
+## Simulation pattern
+
+- `Boids`, `SPH`, `PBF` expose async `step(renderer)`.
+- `SmokeVolume.step(renderer, dt)` is sync but still runs compute passes.
+- Use `await sim.step(renderer)` when you need results the same frame.
+- Use output buffers (positions/instance matrices) for instanced rendering.
+
+## Culling and instancing
+
+- `ComputeInstanceCulling` targets `InstancedMesh` and patches the mesh; it
+  disables `frustumCulled`.
+- `IndirectBatchedMesh` is opaque-only; use `ComputeBatchCulling` for GPU-driven
+  culling and LOD.
+- Call `culler.setCameraUniforms(camera)` and `culler.update()` before render.
+
+## SDF workflows
+
+- `ComputeSDFGenerator` needs a BVH from `three-mesh-bvh`
+  (use `GenerateMeshBVHWorker`).
+- `SDFVolumeConstraint` binds simulations to complex volumes.
+- `ComputeBVHSampler` can seed positions or instance matrices inside volumes.
+
+## Text
+
+- `Text` / `BatchedText` use async glyph and atlas generation.
+- Call `text.sync(callback, renderer)` or listen for `synccomplete` before
+  using layout data.
+
+## TSL nodes
+
+- Many helpers are TSL nodes; use NodeMaterial and assign
+  `material.positionNode`, `material.colorNode`, etc.
+- Keep shader logic in TSL, not raw GLSL.
+
+## Common pitfalls (LLM checklist)
+
+- Using a WebGL renderer -> compute classes fail.
+- Forgetting `renderer.init()` before the first compute call.
+- Skipping awaits when ordering matters.
+- Using `IndirectBatchedMesh` with transparent materials (not supported).
+
+## Starter Template (@three-blocks/starter)
+
+### Quick start
+
+```bash
+npx create-three-blocks-starter my-app
+cd my-app && npm run dev
+```
+
+### Template options
+
+- **starter** (default): WebGPU + PBF demo
+- **minimal**: Rotating cube + grid
+- **scroll**: Smooth scroll website + @three-blocks/core
+- **game**: Physics scene + @three-blocks/pro
+
+Select via: `npx create-three-blocks-starter my-app --template minimal`
+
+### Why offscreen canvas?
+
+3D runs in Web Worker via OffscreenCanvas. UI (React/Vue/vanilla) runs
+on main thread. Heavy DOM updates won't drop 3D FPS—separate threads.
+
+### Dispatcher (cross-thread events)
+
+```
+Main Thread (UI) ←→ Dispatcher ←→ Web Worker (3D)
+```
+
+**Listen to 3D events:**
+
+```js
+import { init, dispatcher } from '/src/main.js';
+
+init({ offscreen: true });
+dispatcher.on('loadProgress', ({ progress }) => updateUI(progress));
+```
+
+**Send to 3D:**
+
+```js
+dispatcher.trigger({ name: 'customEvent' }, { value: 42 });
+```
+
+### Key events
+
+| Event | Direction | Payload |
+|-------|-----------|---------|
+| loadProgress | 3D→UI | { progress: 0-100 } |
+| loadEnd | 3D→UI | {} |
+| workerReady | 3D→UI | {} |
+| resize | UI→3D | { width, height, dpr } |
+| pointerMove | UI→3D | { x, y, clientX, clientY } |
+| scroll | UI→3D | { progress: 0-1 } |
+
+### React integration
+
+```js
+import { init, dispatcher } from '/src/main.js';
+import { useState, useEffect } from 'react';
+
+function App() {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    init({ offscreen: true });
+    dispatcher.on('loadProgress', ({ progress }) => setProgress(progress));
+  }, []);
+
+  return progress < 100 ? <div>Loading {progress}%</div> : null;
+}
+```
+
+### Vue 3 integration
+
+```js
+import { init, dispatcher } from '/src/main.js';
+import { ref, onMounted } from 'vue';
+
+const progress = ref(0);
+
+onMounted(() => {
+  init({ offscreen: true });
+  dispatcher.on('loadProgress', ({ progress: p }) => progress.value = p);
+});
+```
+
+### Component pattern
+
+Components extend `component()` helper for automatic RAF/resize/debug subscription:
+
+```js
+class Demo extends component(THREE.Object3D, { raf: { renderPriority: 1 } }) {
+  init() { /* setup */ }
+  onRaf({ delta, camera }) { /* animate */ }
+  onResize() { /* handle resize */ }
+}
+```
+
+## API Reference
+
+### Compute
+
+GPU compute utilities for culling, sorting, sampling, and SDF generation.
+
+#### ComputeBatchCulling
+**Kind:** Class
+
+```js
+import { ComputeBatchCulling } from '@three-blocks/core';
+```
+
+GPU-driven culling for `IndirectBatchedMesh` with matrix-based reference positions.
+
+**Architecture**
+
+- Optimized for `IndirectBatchedMesh` with per-instance matrices
+- Two-pass block compaction algorithm for efficient parallel writes
+- Supports both ref-position and matrix-based culling
+- Per-geometry bounding sphere tests (reads from mesh geometry info)
+- Writes survivor IDs for indirect instanced draw
+
+**Limitations**
+
+- **Transparency is not supported**: IndirectBatchedMesh does not support transparent materials. Use opaque materials only. Depth sorting is not available.
+
+**Block Compaction Algorithm**
+
+- **Count Pass**: Each instance atomically increments its block counter if visible
+- **Prefix Sum**: CPU computes block offsets (serial over blocks, parallel within)
+- **Scatter Pass**: Each visible instance writes to its block's allocated slot
+
+**Matrix vs Position Mode**
+
+- **Position Mode** (default): Uses `refPosition`/`refNormal` arrays
+- **Matrix Mode** (via `bindMatricesAsReference()`): Extracts position from matrices
+- Enables per-geometry bounding sphere culling
+- Ideal for `IndirectBatchedMesh` integration
+
+**LOD System**
+
+- **Purpose**: Reduce draw density smoothly with distance by keeping each instance with probability `pKeep`.
+- **Near/Far**: `lodNear` defines where LOD begins. `lodFar` defines where range mode reaches full falloff.
+- **Modes** (`lodMode`):
+- **Disabled (`LOD_MODE_DISABLED`)**: LOD sampling is off.
+- **Range (`LOD_MODE_RANGE`)**: Smoothstep falloff between `lodNear` and `lodFar`. `pKeep = 1 - smoothstep( lodNear, lodFar, d )`
+- **Exp (`LOD_MODE_EXP`)**: Exponential density falloff starting at `lodNear`. `pKeep = exp( -density^2 * (d - lodNear)^2 )` Note: `lodNear` shifts the start of the exp curve; increasing it delays the falloff.
+- **Density Parameter**: `lodDensity` acts as exp density (smaller = slower decay).
+- **Sampling**: Each instance is kept if `hash(instanceId) < pKeep`, giving stable stochastic thinning.
+- **Compatibility**: Internally computes `stepF = sqrt(1 / max(pKeep, eps))` for legacy outputs.
+
+**Integration with IndirectBatchedMesh**
+
+##### Properties
+- `indirect`: `THREE.IndirectStorageBufferAttribute` - Get indirect draw buffer.
+- `outIdSSBO`: `THREE.StorageBufferAttribute` - Get survivor ID buffer.
+- `outIdNode`: `StorageNode` - Get survivor ID storage node (TSL).
+
+##### Methods
+
+###### setCameraUniforms(camera)
+Update camera uniforms for frustum culling. Call before `update()` each frame.
+Parameters:
+- `camera`: `THREE.Camera` - Active camera for culling tests.
+
+###### attachGUI(folder)
+Attach culling controls to a GUI folder. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `folder`: `Object` - GUI folder instance (e.g., from lil-gui or renderer.inspector.createParameters()).
+
+###### disposeGUI()
+Detach and destroy the GUI folder.
+
+###### update()
+Execute GPU culling with two-pass block compaction. Must be called every frame before rendering.
+
+###### attachGeometry(geometry)
+Attach geometry to receive indirect draw args.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Target geometry for indirect rendering.
+
+###### attachMesh(mesh)
+Attach mesh and configure survivor buffer.
+Parameters:
+- `mesh`: `THREE.Mesh` - Target mesh instance.
+
+###### setReferenceMatrixNode(resolverFn)
+Override the matrix used for culling (e.g., animation texture).
+Parameters:
+- `resolverFn`: `function | null` - Function receiving { i, baseMatrix, gid } and returning a mat4 node.
+Returns: `this`
+
+###### bindMatricesAsReference(mesh)
+Bind mesh matrices as culling reference (enables matrix mode). Extracts positions from instance matrices and enables per-geometry sphere tests. Automatically called by `IndirectBatchedMesh` when culling is enabled.
+Parameters:
+- `mesh`: `IndirectBatchedMesh` - Mesh with `matricesSB` storage buffer.
+
+###### readIndirectArgs()
+Read back indirect draw arguments from GPU (debug/stats).
+Returns: `Promise.<Uint32Array>` - Array of [indexCount, instanceCount, firstIndex, baseVertex, firstInstance].
+
+###### readSurvivorIndicesAsync()
+Read back surviving instance IDs from GPU (debug/analysis).
+Returns: `Promise.<Uint32Array>` - Array of survivor instance indices.
+
+###### dispose()
+Dispose of GPU resources.
+
+##### Example
+
+```js
+import { IndirectBatchedMesh, ComputeBatchCulling, indirectBatch } from '@three-blocks/core';
+
+// Create batched mesh
+const count = 10000;
+const mesh = new IndirectBatchedMesh(count, 50000, 150000, material);
+mesh.frustumCulled = false; // Disable CPU culling
+
+// Add geometries and instances
+const sphereId = mesh.addGeometry(new SphereGeometry(1, 16, 16));
+for (let i = 0; i < count; i++) {
+  const id = mesh.addInstance(sphereId);
+  const matrix = new Matrix4();
+  matrix.makeTranslation(
+    Math.random() * 100 - 50,
+    Math.random() * 100 - 50,
+    Math.random() * 100 - 50
+  );
+  mesh.setMatrixAt(id, matrix);
+}
+
+// Setup material with indirect batch node
+material.positionNode = Fn(() => {
+  indirectBatch(mesh).toStack();
+  return positionLocal;
+})();
+
+// Create culler
+const culler = new ComputeBatchCulling({
+  renderer,
+  count,
+  indexCount: sphereGeometry.index.count,
+  enabled: true
+});
+
+// Bind mesh matrices as culling reference
+culler.bindMatricesAsReference(mesh);
+culler.attachGeometry(mesh.geometry);
+culler.attachMesh(mesh);
+
+// Render loop
+function animate() {
+  culler.setCameraUniforms(camera);
+  culler.update();  // GPU culling
+  renderer.render(scene, camera);
+}
+```
+
+See also: IndirectBatchedMesh, ComputeInstanceCulling
+
+---
+
+#### ComputeBitonicSort
+**Kind:** Class
+
+```js
+import { ComputeBitonicSort } from '@three-blocks/core';
+```
+
+GPU-accelerated parallel bitonic sort for Three.js TSL compute shaders.
+
+ComputeBitonicSort provides an efficient O(n log²n) parallel sorting algorithm that runs entirely on the GPU. It's designed for sorting large arrays of key-value pairs where deterministic, stable ordering is required. It is used in SPH, PBF, Boids, IndirectBatchedMesh, ComputeInstanceCulling.
+
+##### Features
+
+- **Fully GPU-accelerated**: All sorting operations execute as compute shaders
+- **Stable sorting**: Elements with equal keys maintain their relative order via tie-breaker IDs
+- **Deterministic**: Produces identical results across frames and devices
+- **Dual-backend support**: Optimized path for WebGPU, fallback for WebGL
+- **Workgroup optimization**: Uses shared memory for efficient local sorting (WebGPU)
+- **Bounds-safe**: Handles non-power-of-two counts with sentinel values
+
+##### Usage
+
+##### Data Format
+
+The data buffer must contain `uvec2` elements where:
+
+- **x**: The primary sort key (e.g., spatial hash, distance, priority)
+- **y**: A unique stable ID to break ties deterministically
+
+Elements are sorted in ascending order by (x, y) lexicographically.
+
+##### Performance Considerations
+
+- Buffer count should ideally be a power of 2 for optimal performance
+- Larger workgroup sizes (64-256) typically perform better on modern GPUs
+- The `compute()` method executes all steps synchronously; use `computeStep()` for amortized sorting across multiple frames
+
+##### Constructor Parameters
+- `dataBuffer`: `StorageBufferNode` - The storage buffer containing uvec2 elements to sort. Each element should be a uvec2 where x is the sort key and y is a stable tie-breaker ID.
+- `options?`: `Object` = {} - Configuration options.
+- `options.workgroupSize?`: `number` = 64 - The workgroup size for compute shaders. Must be a power of 2. Larger values (64-256) typically perform better but are limited by GPU capabilities. Will be clamped to valid ranges automatically.
+- `options.ascending?`: `boolean` = true - Sort direction. If true (default), sorts in ascending order (smallest keys first). If false, sorts in descending order (largest keys first).
+
+##### Properties
+- `dataBuffer`: `StorageBufferNode` - The storage buffer containing the data to be sorted. Elements are uvec2 pairs: (sortKey, stableId).
+- `count`: `number` - The number of elements in the data buffer.
+- `dispatchSize`: `number` - The number of thread groups to dispatch for compute operations. Each thread handles one comparison, so dispatchSize = count / 2.
+- `workgroupSize`: `number` - The number of threads per workgroup. Determines how many elements can be sorted in local shared memory. Each workgroup sorts 2 * workgroupSize elements locally.
+- `ascending`: `boolean` - Sort direction. If true (default), sorts ascending (smallest keys first). If false, sorts descending (largest keys first).
+- `globalOnly`: `boolean` - Force global-only sorting (no local workgroup optimization). When true, behaves like WebGL path even on WebGPU. Useful for debugging or when local sorting causes issues.
+- `localStorage`: `WorkgroupInfoNode | null` - Workgroup-scoped shared memory buffer for local sorting operations. Holds 2 * workgroupSize elements during local sort phases. Only initialized for WebGPU backends.
+- `tempBuffer`: `StorageBufferNode` - Temporary storage buffer for ping-pong operations during global swaps. Global operations read from one buffer and write to the other to avoid read-after-write hazards.
+- `infoStorage`: `StorageBufferNode` - Storage buffer containing algorithm state: [stepType, currentSwapSpan, maxSwapSpan]. Used to coordinate multi-dispatch sorting operations.
+- `swapOpCount`: `number` - Total number of distinct swap operations (flips + disperses) in a complete sort. For n elements: (log2(n) * (log2(n) + 1)) / 2
+- `stepCount`: `number` - Total number of compute dispatches needed for a complete sort. Depends on whether local sorting is available (WebGPU) or not (WebGL).
+- `readBufferName`: `string` - Name of the buffer currently being read from ('Data' or 'Temp'). Used for ping-pong buffer management during global operations.
+- `flipGlobalNodes`: `Object.<string, ComputeNode>` - Compute nodes for global flip operations, keyed by source buffer name.
+- `disperseGlobalNodes`: `Object.<string, ComputeNode>` - Compute nodes for global disperse operations, keyed by source buffer name.
+- `swapLocalFn`: `ComputeNode | null` - Compute node for complete local sorting (flip + all disperse stages). Only available on WebGPU backends.
+- `disperseLocalNodes`: `Object.<string, ComputeNode> | null` - Compute nodes for local disperse operations, keyed by source buffer name. Only available on WebGPU backends.
+- `setAlgoFn`: `ComputeNode | null` - Compute node that advances the algorithm state to the next step.
+- `alignFn`: `ComputeNode` - Compute node that copies data from temp buffer back to data buffer. Used to ensure results end up in the original data buffer.
+- `resetFn`: `ComputeNode | null` - Compute node that resets algorithm state for a new sort operation.
+- `currentDispatch`: `number` - Current dispatch index within the sort operation (0 to stepCount - 1).
+- `globalOpsRemaining`: `number` - Number of remaining global operations before switching to local disperse. Used for WebGPU path state management.
+- `globalOpsInSpan`: `number` - Total global operations in the current span. Increments as we process larger swap spans.
+- `initialized`: `boolean` - Whether the sorter has been initialized with a renderer.
+- `isWebGL`: `boolean` - Whether the current backend is WebGL (lacks workgroup shared memory).
+
+##### Methods
+
+###### init(renderer)
+Initializes the sorter for the given renderer.
+
+This method detects the backend type (WebGL vs WebGPU) and creates the appropriate compute shaders. Must be called before sorting, but is automatically invoked by `compute()` and `computeStep()` if needed.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### computeStep(renderer)
+Executes a single step of the bitonic sort.
+
+Call this method repeatedly (once per frame) to amortize sorting cost over multiple frames. A complete sort requires `stepCount` calls.
+
+The method automatically:
+
+- Initializes on first call
+- Advances through flip/disperse stages
+- Handles buffer ping-ponging
+- Resets state when sort completes
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### compute(renderer)
+Executes a complete bitonic sort in a single call.
+
+This method runs all sorting steps synchronously, which may cause frame drops for large arrays. For real-time applications, consider using `computeStep()` to spread the work across multiple frames.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### dispose()
+Disposes of GPU resources held by this sorter.
+
+Call this method when the sorter is no longer needed to free GPU memory. After disposal, the sorter should not be used.
+
+##### Example
+
+```js
+import { instancedArray } from 'three/tsl';
+import { ComputeBitonicSort } from './ComputeBitonicSort.js';
+
+// Create a buffer of uvec2 pairs: (sortKey, stableId)
+const count = 1024;
+const dataBuffer = instancedArray( count, 'uvec2' );
+
+// Initialize the sorter
+const sorter = new ComputeBitonicSort( dataBuffer, { workgroupSize: 64 } );
+
+// In your render loop:
+sorter.compute( renderer ); // Full sort in one call
+
+// Or for amortized sorting across frames:
+sorter.computeStep( renderer ); // One step per frame
+```
+
+---
+
+#### ComputeBVHSampler
+**Kind:** Class
+
+```js
+import { ComputeBVHSampler } from '@three-blocks/core';
+```
+
+GPU-accelerated point sampler for SDF volumes.
+
+**Architecture**
+
+- Uses a pre-computed SDF (Signed Distance Field) to efficiently test volume containment.
+- Employs **Blue Noise Sampling** for temporally stable, low-discrepancy point distribution.
+- Supports **Rejection Sampling** on the GPU to conform to complex shapes.
+- Outputs transformation matrices directly compatible with `THREE.InstancedMesh`.
+
+**Sampling Strategies**
+
+- **Uniform**: Distributes points uniformly within the volume.
+- **Surface**: (Planned) Distributes points near the surface.
+- **Custom**: (Planned) Uses a custom density function.
+
+**Usage** This class is typically used in conjunction with `ComputeSDFGenerator`.
+
+##### Properties
+- `sdfGenerator`: `ComputeSDFGenerator`
+- `renderer`: `THREE.WebGPURenderer`
+- `count`: `number`
+- `strategy`: `string`
+- `alignToNormal`: `boolean`
+- `samplingBounds`: `THREE.Box3 | null`
+- `outMatrixSSBO`: `THREE.StorageInstancedBufferAttribute`
+- `outPositionsSSBO`: `THREE.StorageInstancedBufferAttribute`
+- `output`: `any` - Gets the output transformation matrices.
+- `positionsBuffer`: `any` - Gets the output positions buffer (vec3 per sample). Useful for particle systems like SPH that only need positions.
+
+##### Methods
+
+###### compute(options?, options.sdfThreshold?, options.debug?)
+Computes the volume sampling.
+Parameters:
+- `options?`: `Object` - Compute options
+- `options.sdfThreshold?`: `number` - Override SDF threshold
+- `options.debug?`: `boolean` = false - Enable debug logging
+Returns: `Promise.<void>`
+
+###### updateSDF(sdfGenerator)
+Updates the SDF generator reference (useful when SDF is regenerated).
+Parameters:
+- `sdfGenerator`: `ComputeSDFGenerator` - New SDF generator
+
+###### readback()
+Performs CPU readback of transformation matrices.
+Returns: `Promise.<Float32Array>`
+
+###### calculateValidRate(positions)
+Calculates the valid sample rate (non-zero positions). Accounts for potential vec4 padding in GPU buffers.
+Parameters:
+- `positions`: `Float32Array` - Positions array from readbackPositions()
+Returns: `number` - Valid sample percentage (0-100)
+
+###### dispose()
+Disposes GPU resources.
+
+See also: {@link ComputeSDFGenerator}
+
+---
+
+#### ComputeInstanceCulling
+**Kind:** Class
+
+```js
+import { ComputeInstanceCulling } from '@three-blocks/core';
+```
+
+GPU-driven frustum and LOD culling for massive instanced rendering.
+
+**Architecture**
+
+- Runs entirely on GPU via compute shaders (TSL)
+- Tests each instance against camera frustum and distance
+- Compacts visible instances into packed survivor buffer
+- Writes indirect draw args (instanceCount) atomically
+- Optional depth sorting for transparent objects
+
+**Culling Modes**
+
+- **Frustum Culling**: Excludes instances outside camera view
+- **LOD Sampling**: Continuous distance-based sampling (reduces far instances)
+
+**LOD System**
+
+- **Purpose**: Reduce draw density smoothly with distance by keeping each instance with probability `pKeep`.
+- **Near/Far**: `lodNear` defines where LOD begins. `lodFar` defines where range mode reaches full falloff.
+- **Modes** (`lodMode`):
+- **Disabled (`LOD_MODE_DISABLED`)**: LOD sampling is off.
+- **Range (`LOD_MODE_RANGE`)**: Smoothstep falloff between `lodNear` and `lodFar`. `pKeep = 1 - smoothstep( lodNear, lodFar, d )`
+- **Exp (`LOD_MODE_EXP`)**: Exponential density falloff starting at `lodNear`. `pKeep = exp( -density^2 * (d - lodNear)^2 )` Note: `lodNear` shifts the start of the exp curve; increasing it delays the falloff.
+- **Density Parameter**: `lodDensity` acts as exp density (smaller = slower decay).
+- **Sampling**: Each instance is kept if `hash(instanceId) < pKeep`, giving stable stochastic thinning.
+- **Compatibility**: Internally computes `stepF = sqrt(1 / max(pKeep, eps))` for legacy outputs.
+
+**Performance**
+
+- O(N) GPU parallel culling vs O(N) CPU serial testing
+- Zero CPU overhead after setup
+- Indirect draw eliminates CPU→GPU instance data sync
+- Typical 10-100x performance gain for large instance counts
+
+```js
+import { ComputeInstanceCulling, instanceCullingIndex as index } from '@three-blocks/core';
+
+// Create instanced mesh
+const instancedMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(),
+  new THREE.MeshBasicNodeMaterial(),
+  count
+);
+
+// Create culler
+const culler = new ComputeInstanceCulling(instancedMesh, renderer);
+
+// Use culling index instead of instanceIndex
+material.positionNode = rotate(positionLocal, angle.add(hash(index(culler))))
+```
+
+**Example: Custom positionNode with TSL**
+
+When using `positionNode` with GPU culling, the instanceCulling transform is applied automatically after your positionNode. Use `instanceCullingIndex` to access per-instance data like random seeds or animation offsets:
+
+```js
+import { ComputeInstanceCulling, instanceCullingIndex } from '@three-blocks/core';
+import { time, hash, rotate, positionLocal, normalLocal, transformNormalToView } from 'three/tsl';
+
+const count = 10000;
+const instancedMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(),
+  new THREE.MeshNormalNodeMaterial(),
+  count
+);
+
+// Setup GPU culling
+const culler = new ComputeInstanceCulling(instancedMesh, renderer);
+
+// Access the culled instance index for per-instance variation
+const culledIndex = instanceCullingIndex(culler);
+
+// Compute per-instance rotation angle based on time and instance hash
+const angle = time.mul(0.6).add(hash(culledIndex).mul(Math.PI * 2));
+
+// Apply rotation to position (runs BEFORE instance matrix transform)
+instancedMesh.material.positionNode = rotate(positionLocal, angle);
+
+// Transform normals to match the rotation
+instancedMesh.material.normalNode = transformNormalToView(
+  rotate(normalLocal, angle)
+).normalize();
+```
+
+**Example: Advanced culling with custom visibility logic**
+
+For advanced use cases, you can access the culler's internal buffers directly:
+
+```js
+import { ComputeInstanceCulling } from '@three-blocks/core';
+import { storage, instanceIndex, If, uint } from 'three/tsl';
+
+const culler = new ComputeInstanceCulling(instancedMesh, renderer, {
+  enabled: true,
+  sortObjects: true  // Enable depth sorting for transparency
+});
+
+// Access culling parameters
+culler.lodNear.value = 50;         // LOD near radius
+culler.lodFar.value = 400;         // LOD far radius (range mode)
+culler.lodMode.value = LOD_MODE_RANGE;
+culler.lodDensity.value = 0.00025; // Exp density (exp mode)
+
+// Read back survivor count for debugging
+const args = await culler.readIndirectArgs();
+console.log(`Visible instances: ${args[1]} / ${count}`);
+```
+
+##### Methods
+
+###### setCameraUniforms(camera)
+Update camera uniforms for frustum culling. Call before `update()` each frame.
+Parameters:
+- `camera`: `THREE.Camera` - Active camera for culling tests.
+
+###### attachGUI(folder)
+Attach culling controls to a GUI folder. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `folder`: `Object` - GUI folder instance (e.g., from lil-gui or renderer.inspector.createParameters()).
+
+###### disposeGUI()
+Detach and destroy the GUI folder.
+
+###### update()
+Execute GPU culling and compaction. Runs compute shaders to test visibility, compact survivors, and optionally sort. Must be called every frame before rendering.
+
+###### attachGeometry(geometry)
+Attach geometry to receive indirect draw args.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Target geometry for indirect rendering.
+
+###### attachMesh(mesh)
+Attach mesh and auto-disable sorting for opaque materials.
+Parameters:
+- `mesh`: `THREE.Mesh` - Target mesh instance.
+
+###### readIndirectArgs()
+Read back indirect draw arguments from GPU (debug/stats).
+Returns: `Promise.<(Uint32Array|null)>` - Array of 5 values: [indexCount, instanceCount, firstIndex, baseVertex, firstInstance], or null if not ready.
+
+###### readSurvivorIndicesAsync()
+Read back surviving instance IDs from GPU (debug/analysis).
+Returns: `Promise.<Uint32Array>` - Array of survivor instance indices.
+
+###### setBoundingSphereAt(instanceIndex, center, radius)
+Set bounding sphere for a specific instance. Only effective when `perInstanceBoundingBox` is enabled.
+Parameters:
+- `instanceIndex`: `number` - Index of the instance.
+- `center`: `THREE.Vector3 | Object` - Center of the bounding sphere in local space.
+- `radius`: `number` - Radius of the bounding sphere.
+
+###### getBoundingSphereAt(instanceIndex, target?)
+Get bounding sphere for a specific instance. Only effective when `perInstanceBoundingBox` is enabled.
+Parameters:
+- `instanceIndex`: `number` - Index of the instance.
+- `target?`: `THREE.Vector4` - Optional target to store the result (x,y,z = center, w = radius).
+Returns: `Object | null`
+
+###### setMaxBoundingSphere(boundsData)
+Set the shared bounding sphere used when `perInstanceBoundingBox` is disabled. Computes the maximum bounding sphere that encompasses all provided per-instance bounds.
+Parameters:
+- `boundsData`: `Float32Array | Array.<{center: {x: number, y: number, z: number}, radius: number}>` - Either a Float32Array of vec4 (centerX, centerY, centerZ, radius) per instance, or an array of objects with center and radius properties.
+
+###### initBoundingSpheresStorage(data?)
+Initialize per-instance bounding sphere storage buffer. Call this to enable per-instance culling after construction.
+Parameters:
+- `data?`: `Float32Array` - Optional initial data (vec4 per instance: centerX, centerY, centerZ, radius).
+
+###### dispose()
+Dispose of GPU resources.
+
+Call this method when the culler is no longer needed to free GPU memory. After disposal, the culler should not be used.
+
+##### Example
+
+```js
+import { ComputeInstanceCulling } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Create instanced mesh
+const count = 10000;
+const instancedMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(),
+  new THREE.MeshBasicNodeMaterial(),
+  count
+);
+
+// Initialize instance matrices
+const tempMat = new THREE.Matrix4();
+for (let i = 0; i < count; i++) {
+  tempMat.setPosition(
+    Math.random() * 100 - 50,
+    Math.random() * 100 - 50,
+    Math.random() * 100 - 50
+  );
+  instancedMesh.setMatrixAt(i, tempMat);
+}
+
+// Enable GPU culling - that's it!
+// Automatically patches material.setupPosition() to use culled instances
+new ComputeInstanceCulling(instancedMesh, renderer);
+
+// Render (culling happens automatically)
+function animate() {
+  renderer.render(scene, camera);
+}
+```
+
+See also: {@link instanceCulling} - TSL node for applying culled instance transformations, {@link IndirectBatchedMesh}, {@link ComputeBatchCulling}
+
+Demo: https://three-blocks.com/docs/demos/compute-instance-culling/
+
+---
+
+#### ComputeMeshSurfaceSampler
+**Kind:** Class
+
+```js
+import { ComputeMeshSurfaceSampler } from '@three-blocks/core';
+```
+
+GPU mesh surface sampler using TSL.
+
+**Overview** This class implements a high-performance surface sampling algorithm that runs entirely on the GPU. It is designed to generate thousands or millions of instances distributed on the surface of a mesh.
+
+**Algorithm**
+
+- **CPU Pre-processing**: Builds a weighted distribution (CDF) and Alias Table based on triangle areas.
+- **GPU Sampling**: Uses the Alias Method (O(1)) to select triangles and Blue Noise to pick barycentric coordinates.
+- **Output**: Writes transformation matrices to a storage buffer, ready for `InstancedMesh`.
+
+**Features**
+
+- **Blue Noise**: Ensures samples are well-distributed (low discrepancy) and temporally stable.
+- **Alias Method**: Efficient O(1) selection of weighted triangles.
+- **Normal Alignment**: Aligns instance Y-axis to the surface normal.
+
+**Example: Grass distribution on terrain**
+
+**Example: Resampling specific instances**
+
+```js
+// Resample only instance 42 (e.g., for respawning)
+await sampler.compute({ resampleIndex: 42 });
+
+// Measure GPU performance
+const timestamp = await sampler.compute({ trackTimestamp: true });
+console.log(`Sampling took ${timestamp}ms`);
+```
+
+##### Properties
+- `renderer`: `THREE.WebGPURenderer`
+- `count`: `number`
+- `output`: `any` - Returns the GPU storage buffer containing instance transformation matrices. Can be directly assigned to InstancedMesh.instanceMatrix.
+- `outputNormal`: `any` - Returns the GPU storage buffer containing world-space surface normals per instance.
+
+##### Methods
+
+###### compute(options?, options.resampleIndex?, options.trackTimestamp?)
+Recompute on GPU. Pass {resampleIndex} to update just one instance.
+Parameters:
+- `options?`: `Object` - Options
+- `options.resampleIndex?`: `number` - If provided, updates only this instance index; otherwise all instances are recomputed.
+- `options.trackTimestamp?`: `boolean` - If true, returns the GPU timestamp.
+Returns: `Promise.<(number|undefined)>` - GPU timestamp if {trackTimestamp} is true, otherwise null.
+
+###### readback()
+(optional) Read back transformation matrices to CPU
+Returns: `Promise.<Float32Array>` - Array of mat4 matrices (16 floats per instance)
+
+##### Example
+
+```js
+import { ComputeMeshSurfaceSampler } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Load terrain mesh
+const terrain = await loadTerrain();
+
+// Create sampler for 100,000 grass blades
+const sampler = new ComputeMeshSurfaceSampler(terrain, renderer, 100000, {
+  seed: 42,
+  useVertexNormals: true
+});
+
+// Run sampling on GPU
+await sampler.compute();
+
+// Create instanced grass using the sampled transforms
+const grassGeometry = new THREE.PlaneGeometry(0.1, 0.5);
+const grassMaterial = new THREE.MeshStandardNodeMaterial({ color: 0x3d9140 });
+const grass = new THREE.InstancedMesh(grassGeometry, grassMaterial, 100000);
+
+// Assign the GPU-generated transforms directly
+grass.instanceMatrix = sampler.output;
+scene.add(grass);
+```
+
+---
+
+#### ComputeMipAwareBlueNoise
+**Kind:** Class
+
+```js
+import { ComputeMipAwareBlueNoise } from '@three-blocks/core';
+```
+
+Generates a mip-aware blue noise texture using the Hilbert R1 blue noise algorithm.
+
+**Overview** Blue noise textures are essential for high-quality rendering techniques such as:
+
+- **Dithering**: Reducing quantization artifacts in gradients.
+- **Stochastic Sampling**: Monte Carlo integration, soft shadows, and ambient occlusion.
+- **Temporal Anti-Aliasing (TAA)**: Providing stable, high-frequency noise that integrates well over time.
+
+**Features**
+
+- **Mip-Awareness**: Generates noise that remains blue (high-frequency) across mip levels, preventing aliasing artifacts when the texture is minified.
+- **Hilbert R1 Algorithm**: Uses a low-discrepancy sequence mapped to a Hilbert curve for optimal spatial distribution.
+- **GPU Generation**: Fully computed on the GPU for fast initialization.
+
+##### Properties
+- `storageTexture`: `THREE.StorageTexture | null`
+
+##### Methods
+
+###### init(renderer)
+Initializes and generates the blue noise texture using compute shaders. This method must be called before using the texture.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - The WebGPU renderer instance used for computation.
+Returns: `THREE.StorageTexture` - The generated storage texture.
+
+###### getTexture()
+Returns the generated blue noise texture.
+Returns: `THREE.StorageTexture | null` - The generated texture, or null if `init()` has not been called.
+
+---
+
+#### ComputePointsSDFGenerator
+**Kind:** Class
+
+```js
+import { ComputePointsSDFGenerator } from '@three-blocks/core';
+```
+
+GPU-accelerated SDF (Signed Distance Field) generator for point clouds using PointsBVH.
+
+**Overview** Generates a 3D texture containing distances from a point cloud surface. Uses PointsBVH (from three-mesh-bvh) for O(log N) nearest-point queries. The "surface" is defined by a shell radius around each point.
+
+**Features**
+
+- **Fast Generation**: Uses compute shaders to generate SDFs in parallel.
+- **PointsBVH Acceleration**: Leverages `three-mesh-bvh` PointsBVH for efficient queries.
+- **Shell Radius**: Defines surface thickness around points (auto-computed or user-specified).
+- **Auto Shell Radius**: Estimates optimal radius from point cloud density.
+
+**Usage** The generated 3D texture can be used for:
+
+- **Volume Rendering**: Raymarching point cloud isosurfaces.
+- **Collision Detection**: GPU-based particle collisions.
+- **VFX**: Distance-based effects around point cloud surfaces.
+
+##### Properties
+- `resolution`: `number`
+- `margin`: `number`
+- `threshold`: `number`
+- `shellRadiusOption`: `number | 'auto'`
+- `customBounds`: `THREE.Box3 | null`
+- `workgroupSize`: `THREE.Vector3`
+- `sdfTexture`: `any` - Gets the generated SDF texture.
+- `shellRadius`: `any` - Gets the computed shell radius.
+- `shellRadius`: `any` - Sets the shell radius (triggers regeneration on next generate call).
+- `boundsMatrix`: `any` - Gets the bounds transformation matrix (local to world).
+- `inverseBoundsMatrix`: `any` - Gets the inverse bounds matrix (world to local).
+- `bounds`: `any` - Gets the computed bounding box (includes margin).
+- `geometryBounds`: `any` - Gets the tight geometry bounding box (without margin).
+
+##### Methods
+
+###### generate(geometry, bvh, renderer)
+Generates SDF texture from point cloud geometry and PointsBVH.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Source geometry with position attribute
+- `bvh`: `PointsBVH` - PointsBVH from three-mesh-bvh
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer
+Returns: `Promise.<THREE.Storage3DTexture>` - Generated SDF texture
+
+###### update(geometry, bvh, renderer)
+Updates SDF texture with potentially modified point cloud/BVH. More efficient than full regeneration if structure hasn't changed.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Source geometry
+- `bvh`: `PointsBVH` - PointsBVH from three-mesh-bvh
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer
+Returns: `Promise.<THREE.Storage3DTexture>` - Updated SDF texture
+
+###### dispose()
+Disposes GPU resources.
+
+---
+
+#### ComputePrefixSum
+**Kind:** Class
+
+```js
+import { ComputePrefixSum } from '@three-blocks/core';
+```
+
+GPU-accelerated parallel prefix sum (exclusive scan) for Three.js TSL compute shaders.
+
+ComputePrefixSum implements the Blelloch scan algorithm for computing prefix sums entirely on the GPU. It's designed as a building block for more complex parallel algorithms like radix sort.
+
+##### Features
+
+- **Fully GPU-accelerated**: All operations execute as compute shaders
+- **Hierarchical**: Handles arrays larger than a single workgroup via recursive block sums
+- **Work-efficient**: O(n) work complexity using Blelloch algorithm
+- **WebGPU only**: Requires workgroup shared memory (not available in WebGL)
+
+##### Algorithm
+
+The Blelloch scan operates in two phases:
+
+- **Up-sweep (reduce)**: Build a tree of partial sums from leaves to root
+- **Down-sweep**: Propagate prefix sums from root back to leaves
+
+For arrays larger than workgroup capacity, the algorithm:
+
+- Computes local prefix sums per workgroup
+- Extracts block sums (total per workgroup)
+- Recursively computes prefix sum on block sums
+- Adds block prefix sums back to each element
+
+##### Usage
+
+##### Properties
+- `dataBuffer`: `StorageBufferNode` - The storage buffer to compute prefix sum on (modified in place).
+- `count`: `number` - Number of elements in the buffer.
+- `workgroupSize`: `number` - Number of threads per workgroup.
+- `itemsPerWorkgroup`: `number` - Number of elements processed per workgroup (2 per thread).
+- `workgroupCount`: `number` - Number of workgroups needed.
+- `localStorage`: `WorkgroupArrayNode` - Workgroup shared memory for local scan.
+- `blockSumsBuffer`: `StorageBufferNode` - Buffer storing each workgroup's total sum.
+- `blockPrefixSum`: `ComputePrefixSum` - Recursive prefix sum for block sums.
+- `localScanFn`: `ComputeNode` - Local scan compute function.
+- `addBlockSumsFn`: `ComputeNode` - Add block sums compute function.
+- `initialized`: `boolean` - Whether initialized.
+
+##### Methods
+
+###### init(renderer)
+Initializes the prefix sum for the given renderer.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### compute(renderer)
+Computes the prefix sum in a single call.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### dispose()
+Disposes of GPU resources held by this instance.
+
+##### Example
+
+```js
+import { instancedArray } from 'three/tsl';
+import { ComputePrefixSum } from '@three-blocks/core';
+
+// Create a buffer of uint values
+const data = instancedArray(new Uint32Array([3, 1, 4, 1, 5, 9, 2, 6]), 'uint');
+
+// Create prefix sum instance
+const prefixSum = new ComputePrefixSum(data);
+
+// Compute prefix sum
+prefixSum.compute(renderer);
+// Result: [0, 3, 4, 8, 9, 14, 23, 25]
+```
+
+---
+
+#### ComputeRadixSort
+**Kind:** Class
+
+```js
+import { ComputeRadixSort } from '@three-blocks/core';
+```
+
+GPU-accelerated stable radix sort using the Blelloch scan algorithm.
+
+ComputeRadixSort provides an O(n) stable sorting algorithm that runs entirely on the GPU. It uses a configurable radix (1, 2, or 4 bits per pass) with workgroup-local prefix sums for optimal performance.
+
+##### Algorithm
+
+For each N-bit pass:
+
+- **Phase 1 - Local Histogram + Prefix Sum**: Each workgroup counts digit occurrences and computes local prefix sums using shared memory
+- **Phase 2 - Global Prefix Sum**: Compute prefix sum on workgroup totals
+- **Phase 3 - Scatter**: Write elements to sorted positions using deterministic offsets
+
+##### Radix Bits Configuration
+
+Bits Buckets Passes Memory Best For     1 2 32 Lowest Small datasets, low memory   2 4 16 Low General use (default)   4 16 8 Medium Large datasets, fewer passes
+
+##### Stability
+
+The algorithm is inherently stable because:
+
+- Local prefix sums preserve element order within each workgroup
+- Global prefix sums preserve workgroup order
+- No atomic operations in scatter phase (deterministic positions)
+
+##### Usage
+
+##### Properties
+- `keysBuffer`: `StorageBufferNode` - The storage buffer containing keys to sort.
+- `valuesBuffer`: `StorageBufferNode | null` - Optional values buffer to sort alongside keys.
+- `count`: `number` - Number of elements to sort.
+- `radixBits`: `number` - Number of radix bits per pass (1, 2, or 4).
+- `keyBits`: `number` - Effective key width in bits (16 or 32). Use 16 for faster sorting with reduced precision (halves number of passes).
+- `bucketCount`: `number` - Number of buckets (2^radixBits).
+- `bitMask`: `number` - Bit mask for extracting digits (bucketCount - 1).
+- `passCount`: `number` - Number of passes (keyBits / radixBits). With keyBits=16 and radixBits=2, this is 8 passes instead of 16.
+- `workgroupSize`: `number` - Threads per workgroup.
+- `elementsPerWorkgroup`: `number` - Elements processed per workgroup (2 per thread).
+- `workgroupCount`: `number` - Number of workgroups.
+- `bitOffsetUniform`: `UniformNode` - Uniform for current bit offset.
+- `initialized`: `boolean` - Whether initialized.
+- `readBufferName`: `string` - Current read buffer name ('Keys' or 'Temp').
+- `tempKeysBuffer`: `StorageBufferNode` - Temporary keys buffer for ping-pong.
+- `tempValuesBuffer`: `StorageBufferNode | null` - Temporary values buffer for ping-pong.
+- `localPrefixBuffer`: `StorageBufferNode` - Per-element local prefix sums (one uint per bucket per element). Layout: element[i] bucket[d] -> index i * bucketCount + d
+- `digitCountsBuffer`: `StorageBufferNode` - Consolidated per-workgroup digit counts for all buckets. Layout: digit[d] workgroup[wg] -> index d * workgroupCount + wg After prefix sum phase, contains cumulative counts.
+- `digitTotalsBuffer`: `StorageBufferNode` - Global digit totals and base positions (bucketCount * 2 elements). First half [0..bucketCount-1]: total count for each digit Second half [bucketCount..2*bucketCount-1]: base position for each digit
+
+##### Methods
+
+###### init(renderer)
+Initializes the sorter for the given renderer.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### computePass(renderer, bitOffset)
+Executes a single sorting pass.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+- `bitOffset`: `number` - The bit offset for this pass.
+
+###### compute(renderer)
+Executes a complete radix sort (all passes).
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+
+###### computeStep(renderer, passIndex)
+Executes a single step of the radix sort (one pass).
+
+Call this method `passCount` times to complete a full 32-bit sort. Useful for amortizing sort cost across multiple frames.
+Parameters:
+- `renderer`: `WebGPURenderer` - The Three.js WebGPU renderer.
+- `passIndex`: `number` - Pass index (0 to passCount-1).
+
+###### dispose()
+Disposes of GPU resources held by this sorter.
+
+##### Example
+
+```js
+import { instancedArray } from 'three/tsl';
+import { ComputeRadixSort } from '@three-blocks/core';
+
+// Create a buffer of uint keys to sort
+const keysBuffer = instancedArray(new Uint32Array([5, 2, 8, 1, 9, 3]), 'uint');
+
+// Optional: values buffer to sort alongside keys
+const valuesBuffer = instancedArray(new Uint32Array([50, 20, 80, 10, 90, 30]), 'uint');
+
+// Initialize the sorter (default 2-bit radix)
+const sorter = new ComputeRadixSort(keysBuffer, { values: valuesBuffer });
+
+// Or use 4-bit radix for fewer passes on large datasets
+const fastSorter = new ComputeRadixSort(keysBuffer, { radixBits: 4 });
+
+// In your render loop:
+sorter.compute(renderer);
+// Result: keys = [1, 2, 3, 5, 8, 9], values = [10, 20, 30, 50, 80, 90]
+```
+
+---
+
+#### ComputeSDFGenerator
+**Kind:** Class
+
+```js
+import { ComputeSDFGenerator } from '@three-blocks/core';
+```
+
+GPU-accelerated SDF (Signed Distance Field) generator using mesh BVH.
+
+**Overview** Generates a 3D texture containing signed distances from a mesh surface. It uses a BVH (Bounding Volume Hierarchy) acceleration structure to efficiently query the closest point on the mesh for each voxel.
+
+**Features**
+
+- **Fast Generation**: Uses compute shaders to generate SDFs in parallel.
+- **BVH Acceleration**: Leverages `three-mesh-bvh` for O(log N) distance queries.
+- **Dynamic Updates**: Can update the SDF if the mesh deforms (provided the BVH is updated).
+
+**Usage** The generated 3D texture can be used for:
+
+- **Volume Rendering**: Raymarching clouds, smoke, or fluids.
+- **Collision Detection**: GPU-based particle collisions.
+- **VFX**: Attracting/repelling particles from a surface.
+
+##### Properties
+- `resolution`: `number`
+- `margin`: `number`
+- `threshold`: `number`
+- `customBounds`: `THREE.Box3 | null`
+- `workgroupSize`: `THREE.Vector3`
+- `sdfTexture`: `any` - Gets the generated SDF texture.
+- `boundsMatrix`: `any` - Gets the bounds transformation matrix (local to world).
+- `inverseBoundsMatrix`: `any` - Gets the inverse bounds matrix (world to local).
+- `bounds`: `any` - Gets the computed bounding box (includes margin).
+- `geometryBounds`: `any` - Gets the tight geometry bounding box (without margin). Useful for focused sampling in ComputeBVHSampler.
+- `meshMatrixWorld`: `any` - Gets the mesh's world matrix (for skinned meshes). Used by ComputeBVHSampler to transform output to world space.
+
+##### Methods
+
+###### generate(geometry, bvh, renderer)
+Generates SDF texture from mesh and BVH.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Source geometry
+- `bvh`: `*` - BVH from three-mesh-bvh (with _roots array)
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer
+Returns: `Promise.<THREE.Storage3DTexture>` - Generated SDF texture
+
+###### update(geometry, bvh, renderer)
+Updates SDF texture with potentially modified mesh/BVH. More efficient than full regeneration if structure hasn't changed.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Source geometry
+- `bvh`: `*` - BVH from three-mesh-bvh
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer
+Returns: `Promise.<THREE.Storage3DTexture>` - Updated SDF texture
+
+###### dispose()
+Disposes GPU resources.
+
+---
+
+#### SDFVolumeHelpers
+**Kind:** Module
+
+Collection of helper utilities for debugging and visualizing SDF volumes.
+
+**Overview** These helpers provide visual feedback for SDF generation and sampling, which is crucial for debugging:
+
+- **Bounds Helper**: Visualizes the volume extent.
+- **Point Cloud**: Visualizes sampled points to verify distribution and containment.
+- **Debug Grid**: Visualizes the SDF values (distance field) directly using a grid of spheres.
+
+##### Methods
+
+###### createSDFBoundsHelper(sdfGenerator, color?)
+Creates a Box3Helper for visualizing SDF volume bounds.
+Parameters:
+- `sdfGenerator`: `ComputeSDFGenerator` - SDF generator instance.
+- `color?`: `number` = 0xffff00 - Helper line color.
+Returns: `THREE.Box3Helper` - Box helper for SDF bounds.
+
+###### updateSDFBoundsHelper(helper, sdfGenerator)
+Updates an existing Box3Helper to match current SDF bounds.
+Parameters:
+- `helper`: `THREE.Box3Helper` - Existing Box3Helper.
+- `sdfGenerator`: `ComputeSDFGenerator` - SDF generator instance.
+
+###### createSDFPointCloudHelper(sampler, options?, options.pointSize?, options.color?)
+Creates a point cloud visualization of sampled positions.
+Parameters:
+- `sampler`: `ComputeBVHSampler` - BVH sampler instance.
+- `options?`: `Object` - Configuration options.
+- `options.pointSize?`: `number` = 2 - Point size in pixels.
+- `options.color?`: `number` = 0x00ffff - Point color.
+Returns: `Promise.<THREE.Points>` - Points mesh for visualization.
+
+###### createSDFDebugGrid(sdfGenerator, options?, options.gridSize?, options.sphereRadius?, options.colorFn?)
+Creates a grid of spheres showing SDF sample locations (for debugging sampling).
+Parameters:
+- `sdfGenerator`: `ComputeSDFGenerator` - SDF generator instance.
+- `options?`: `Object` - Configuration options.
+- `options.gridSize?`: `number` = 8 - Number of samples per axis.
+- `options.sphereRadius?`: `number` = 0.02 - Sphere radius.
+- `options.colorFn?`: `function` - Custom color function: `(sdfValue) => THREE.Color`.
+Returns: `THREE.Group` - Group containing sphere instances.
+
+---
+
+### TSL
+
+Three.js Shading Language nodes for custom shader effects.
+
+#### animationTextureMatrix [TSL]
+**Kind:** Function
+
+```js
+import { animationTextureMatrix } from '@three-blocks/core';
+```
+
+Sample a 4×4 transformation matrix from a baked animation texture (VAT/OAT). Supports optional frame interpolation for smooth playback.
+
+**Algorithm**
+
+- Computes texel address from `idIndex * framesCount + frameIndex`
+- Fetches 4 consecutive texels representing matrix columns
+- When interpolation > 0, blends with next frame's matrix
+- Returns composed 4×4 transformation matrix
+
+**Texture Layout**
+
+- Each matrix occupies 4 consecutive texels (columns stored as RGBA)
+- Matrices are stored sequentially: `idIndex * framesCount + frameIndex`
+- Compatible with EXR textures exported by {@link AnimationBakeMixer}
+
+**Use Cases**
+
+- Vertex Animation Textures (VAT) with `vertexIndex`
+- Object Animation Textures (OAT) with `instanceIndex`
+- Custom animation sampling with manual frame control
+
+##### Parameters
+- `textureNode`: `Node` - Baked animation texture (EXR with transformation data).
+- `frameIndex`: `Node.<int>` - Current frame index to sample.
+- `framesCount`: `Node.<int>` - Total number of frames in the animation.
+- `timeInterpolation?`: `Node.<float>` = 0 - Interpolation factor [0..1] between current and next frame.
+- `textureOffset?`: `Node.<int>` = 0 - Offset in the texture for packed animations.
+- `idIndex?`: `Node.<int>` = vertexIndex - Index used to identify the vertex or instance (VAT uses `vertexIndex`, OAT uses `instanceIndex`).
+
+Returns: `Node.<mat4>` - Transformation matrix for the specified frame and ID.
+
+##### Example
+
+```js
+import { AnimationBakeMixer } from '@three-blocks/core';
+import { animationTextureMatrix } from '@three-blocks/core';
+import { MeshBasicNodeMaterial, instanceIndex } from 'three/tsl';
+
+// Using AnimationBakeMixer (recommended)
+const mixer = new AnimationBakeMixer(texture, { mode: 'object', fps: 60 });
+mixer.registerMaterial(material);
+mixer.play();
+
+// Manual usage with node material
+const material = new MeshBasicNodeMaterial();
+material.positionNode = animationTextureMatrix(
+  texture,
+  mixer.frameIndexUniform,
+  mixer.framesCountUniform,
+  mixer.frameTimeUniform,
+  mixer.textureOffsetUniform,
+  instanceIndex  // Use instanceIndex for OAT, vertexIndex for VAT
+).mul(vec4(positionLocal, 1.0)).xyz;
+```
+
+See also: AnimationBakeMixer, AnimationBakeLoader, animationTexturePosition, animationTextureNormal
+
+---
+
+#### animationTextureNormal [TSL]
+**Kind:** Function
+
+```js
+import { animationTextureNormal } from '@three-blocks/core';
+```
+
+Sample transformed normal from a baked animation texture. Correctly handles non-uniform scaling by normalizing the basis vectors.
+
+**Algorithm**
+
+- Retrieves transformation matrix via {@link animationTextureMatrix}
+- Extracts 3×3 rotation/scale basis from mat4
+- Computes per-axis scale factors via dot products
+- Divides normal by scale factors before matrix multiplication
+- Returns properly transformed normal vector
+
+**Technical Details**
+
+- Handles non-uniform scaling correctly (unlike naive normal transformation)
+- Renormalization prevents lighting artifacts on scaled geometries
+- Compatible with both VAT (vertex normals) and OAT (instance normals)
+
+##### Parameters
+- `textureNode`: `Node` - Baked animation texture.
+- `frameIndex`: `Node.<int>` - Current frame index.
+- `framesCount`: `Node.<int>` - Total frame count.
+- `timeInterpolation?`: `Node.<float>` = 0 - Interpolation factor [0..1].
+- `textureOffset?`: `Node.<int>` = 0 - Offset in the texture for packed animations.
+- `idIndex?`: `Node.<int>` = vertexIndex - Vertex or instance index.
+
+Returns: `Node.<vec3>` - Transformed normal.
+
+##### Example
+
+```js
+import { AnimationBakeMixer, animationTextureNormal } from '@three-blocks/core';
+import { MeshStandardNodeMaterial, instanceIndex } from 'three/tsl';
+
+// Using AnimationBakeMixer (recommended - sets both position and normal)
+const mixer = new AnimationBakeMixer(texture, { mode: 'object', fps: 60 });
+mixer.registerMaterial(material);
+
+// Manual node material setup
+const material = new MeshStandardNodeMaterial();
+material.normalNode = animationTextureNormal(
+  texture,
+  frameUniform,
+  framesCountUniform,
+  interpolationUniform,
+  textureOffsetUniform,
+  instanceIndex  // Use instanceIndex for OAT, vertexIndex for VAT
+);
+```
+
+See also: AnimationBakeMixer, AnimationBakeLoader, animationTextureMatrix, animationTexturePosition
+
+---
+
+#### animationTexturePosition [TSL]
+**Kind:** Function
+
+```js
+import { animationTexturePosition } from '@three-blocks/core';
+```
+
+Sample transformed position from a baked animation texture. Convenience wrapper that applies the animation matrix to `positionLocal`.
+
+**Algorithm**
+
+- Retrieves transformation matrix via {@link animationTextureMatrix}
+- Multiplies matrix by `vec4(positionLocal, 1.0)` for proper translation
+- Returns transformed XYZ position
+
+**Use Cases**
+
+- Quick setup for vertex/object animation with {@link AnimationBakeMixer}
+- Procedural mesh deformation with baked keyframes
+- Instanced object animation with unique timelines per instance
+
+##### Parameters
+- `textureNode`: `Node` - Baked animation texture.
+- `frameIndex`: `Node.<int>` - Current frame index.
+- `framesCount`: `Node.<int>` - Total frame count.
+- `timeInterpolation?`: `Node.<float>` = 0 - Interpolation factor [0..1].
+- `textureOffset?`: `Node.<int>` = 0 - Offset in the texture for packed animations.
+- `idIndex?`: `Node.<int>` = vertexIndex - Vertex or instance index.
+
+Returns: `Node.<vec3>` - Transformed position.
+
+##### Example
+
+```js
+import { AnimationBakeMixer, animationTexturePosition } from '@three-blocks/core';
+import { MeshBasicNodeMaterial, vertexIndex } from 'three/tsl';
+
+// Using AnimationBakeMixer (recommended - handles all setup)
+const mixer = new AnimationBakeMixer(texture, { mode: 'vertex', fps: 30 });
+mixer.registerMaterial(material);
+
+// Manual node material setup
+const material = new MeshBasicNodeMaterial();
+material.positionNode = animationTexturePosition(
+  texture,
+  frameUniform,
+  framesCountUniform,
+  interpolationUniform,
+  textureOffsetUniform,
+  vertexIndex  // Use vertexIndex for VAT, instanceIndex for OAT
+);
+```
+
+See also: AnimationBakeMixer, AnimationBakeLoader, animationTextureMatrix, animationTextureNormal
+
+---
+
+#### biplanarTexture [TSL]
+**Kind:** Function
+
+```js
+import { biplanarTexture } from '@three-blocks/core';
+```
+
+Efficient biplanar texture mapping for world-space triplanar-style effects. Samples only the two most dominant axis projections and blends them, reducing texture fetches compared to full triplanar mapping.
+
+**Algorithm**
+
+- Determines the two dominant axes based on surface normal
+- Projects position onto corresponding planes (XY, YZ, ZX)
+- Samples textures with proper derivatives for mipmapping
+- Blends samples using weighted power curve for smooth transitions
+
+**Benefits**
+
+- 33% fewer texture samples than triplanar (2 vs 3)
+- Avoids visible seams on axis-aligned surfaces
+- Supports per-axis texture variation
+- Automatic mipmap derivatives via `grad()`
+
+##### Parameters
+- `textureXNode`: `Node` - Texture sampled on YZ plane (X-axis projection).
+- `textureYNode?`: `Node` = textureXNode - Texture sampled on ZX plane (Y-axis projection).
+- `textureZNode?`: `Node` = textureXNode - Texture sampled on XY plane (Z-axis projection).
+- `scaleNode?`: `Node.<float>` = 1 - UV coordinate scale multiplier.
+- `positionNode?`: `Node.<vec3>` = positionLocal - Fragment position for UV projection.
+- `normalNode?`: `Node.<vec3>` = normalLocal - Surface normal for axis weight calculation.
+- `hardnessNode?`: `Node.<float>` = 8 - Blend sharpness (higher = sharper transitions).
+
+Returns: `Node.<vec4>` - Blended texture color (RGBA).
+
+##### Example
+
+```js
+import { biplanarTexture } from '@three-blocks/core';
+import { texture, float } from 'three/tsl';
+
+const diffuseTex = texture(diffuseMap);
+const normalTex = texture(normalMap);
+
+// Same texture on all axes with 2x tiling
+material.colorNode = biplanarTexture(diffuseTex, null, null, float(2));
+
+// Different textures per axis
+material.colorNode = biplanarTexture(
+  texture(texX),  // YZ plane
+  texture(texY),  // ZX plane
+  texture(texZ),  // XY plane
+  float(1),       // scale
+  positionLocal,  // position
+  normalLocal,    // normal
+  float(8)        // blend hardness
+);
+```
+
+---
+
+#### blueNoise [TSL]
+**Kind:** Function
+
+```js
+import { blueNoise } from '@three-blocks/core';
+```
+
+Hilbert R1 Blue Noise generator with normalized float output. Combines Hilbert curve spatial ordering with R1 low-discrepancy sequence to produce high-quality blue noise values in [0,1] range.
+
+**Algorithm**
+
+- Maps 2D coordinates to 1D via Hilbert curve (space-filling curve)
+- Applies R1 sequence (low-discrepancy) for temporal stability
+- Produces blue noise spectrum (minimal low-frequency content)
+
+**Use Cases**
+
+- Temporal anti-aliasing (TAA) jitter patterns
+- Dithering and ordered dithering
+- Stochastic sampling for ray tracing
+- Volumetric noise without banding
+
+##### Parameters
+- `p`: `Node.<ivec2>` - 2D screen-space integer coordinates.
+- `level`: `Node.<int>` - Hilbert curve recursion level (typically 5-10, higher = finer pattern).
+
+Returns: `Node.<float>` - Normalized blue noise value in [0..1].
+
+##### Example
+
+```js
+import { blueNoise } from '@three-blocks/core';
+import { int, screenCoordinate, uniform } from 'three/tsl';
+
+// Temporal AA jitter
+const screenCoord = screenCoordinate.xy.mul(resolution);
+const jitter = blueNoise(screenCoord.toInt(), int(8));
+const offset = jitter.mul(2.0).sub(1.0).mul(pixelSize);
+const jitteredUV = uv.add(offset);
+
+// Dithering threshold
+const threshold = blueNoise(fragCoord.toInt(), int(6));
+const dithered = color.greaterThan(threshold).select(1.0, 0.0);
+```
+
+---
+
+#### CurlNoise
+**Kind:** Module
+
+**What is curl noise?** Curl noise constructs a *vector field* by taking the curl of a vector potential: `flow = ∇ × A`. Because `div(∇ × A) = 0`, the resulting field is divergence-free.
+
+**Usual usage**
+
+- Advect particles: `pos += curlNoise(pos) * dt` (or integrate multiple substeps for prettier flow)
+- UV/normal distortion: flow-based warping without obvious compress/expand artifacts
+- Stylized fluid-like motion and turbulence fields
+
+**Performance notes**
+
+- Uses analytic derivatives of simplex noise ⇒ **3 noise evaluations** per sample
+- Avoids finite differences ⇒ typically far faster than naive curl implementations
+
+**Code example**
+
+##### Methods
+
+###### curlNoise(position, frequency?, time?, amplitude?, normalize?)
+Divergence-free curl noise vector field (incompressible swirling flow).
+
+**Note** This function returns a velocity field. For “pretty curl-noise visuals”, integrate it over time (see `curlAdvect`) or use it to advect particles.
+Parameters:
+- `position`: `vec3` - World/texture position.
+- `frequency?`: `number | float` = 1.0 - Spatial frequency (detail scale).
+- `time?`: `number | float` = 0.0 - Animation time (translation in noise space).
+- `amplitude?`: `number | float` = 1.0 - Output magnitude.
+- `normalize?`: `boolean | bool` = false - When true, output is unit length (direction only).
+Returns: `vec3` - Divergence-free flow vector.
+
+###### curlNoiseFbm(position, baseFrequency?, time?, octaves?, lacunarity?, gain?, amplitude?, normalize?)
+Multi-octave curl noise (FBM) for richer turbulence.
+
+Keep octaves low for realtime (2–4). Each octave is still efficient (3 derivative-noise evaluations), but it adds up quickly.
+Parameters:
+- `position`: `vec3`
+- `baseFrequency?`: `number | float` = 1.0
+- `time?`: `number | float` = 0.0
+- `octaves?`: `number | int` = 3
+- `lacunarity?`: `number | float` = 2.0
+- `gain?`: `number | float` = 0.5
+- `amplitude?`: `number | float` = 1.0
+- `normalize?`: `boolean | bool` = false
+Returns: `vec3`
+
+###### curlAdvect(position, frequency?, time?, steps?, dt?, warp?, amplitude?, useFbm?, octaves?, lacunarity?, gain?)
+Integrate (advect) a position through a curl-noise field to reveal coherent vortices.
+
+This is the “missing piece” when demos look like generic displacement. Advection performs: `p = p + v(p) * dt` repeatedly. Even 4–8 steps can transform the look dramatically.
+
+**Design choices**
+
+- The field is kept mostly stable by using a very small internal time drift.
+- A cheap domain warp breaks axis-aligned / lattice artifacts (especially in instanced grids).
+Parameters:
+- `position`: `vec3` - Starting position.
+- `frequency?`: `number | float` = 1.0 - Field frequency (detail scale).
+- `time?`: `number | float` = 0.0 - Advection time driver (used for subtle drift).
+- `steps?`: `number | int` = 6 - Number of substeps (4–8 typical).
+- `dt?`: `number | float` = 0.18 - Step size per substep (0.10–0.25 typical).
+- `warp?`: `number | float` = 0.75 - Domain warp strength (0 disables).
+- `amplitude?`: `number | float` = 1.0 - Scales final displacement from the original position.
+- `useFbm?`: `boolean | bool` = true - Uses FBM curl field when true, single-octave when false.
+- `octaves?`: `number | int` = 3 - FBM octaves (used if useFbm=true).
+- `lacunarity?`: `number | float` = 2.0 - FBM lacunarity.
+- `gain?`: `number | float` = 0.5 - FBM gain.
+Returns: `vec3` - Advected position.
+
+##### Example
+
+```js
+const positionBuffer = instancedArray(COUNT, 'vec3');
+const velocityBuffer = instancedArray(COUNT, 'vec3');
+const prevVelocityBuffer = instancedArray(COUNT, 'vec3');
+const matrixBuffer = instancedArray(COUNT, 'mat4');
+const aoBuffer = instancedArray(COUNT, 'float');
+
+// Build lookAt matrix from direction (reusable in compute)
+const buildLookAtMatrix = Fn(([direction, position]) => {
+  const up = vec3(0, 1, 0);
+  const dir = normalize(direction);
+
+  const right = normalize(cross(up, dir));
+  const correctedUp = normalize(cross(dir, right));
+
+  // Build full transformation matrix with rotation + translation
+  return mat4(
+    vec4(right, 0),
+    vec4(correctedUp, 0),
+    vec4(dir, 0),
+    vec4(position, 1)
+  );
+});
+
+// computeInit: spawn particles at center with curl noise distribution
+const computeInit = Fn(() => {
+  const i = float(instanceIndex);
+
+  // Spherical distribution from center
+  const phi = i.mul(2.399963);  // golden angle
+  const theta = i.div(COUNT).mul(Math.PI);
+  const r = i.div(COUNT).sqrt().mul(3.0);
+
+  const pos = vec3(
+    r.mul(theta.sin()).mul(phi.cos()),
+    r.mul(theta.cos()),
+    r.mul(theta.sin()).mul(phi.sin())
+  );
+
+  const initVel = vec3(0, 1, 0);
+
+  positionBuffer.element(instanceIndex).assign(pos);
+  velocityBuffer.element(instanceIndex).assign(initVel);
+  prevVelocityBuffer.element(instanceIndex).assign(initVel);
+  matrixBuffer.element(instanceIndex).assign(buildLookAtMatrix(initVel, pos));
+  aoBuffer.element(instanceIndex).assign(0.0);
+});
+
+renderer.compute(computeInit().compute(COUNT));
+
+// Uniforms
+const uFrequency = uniform(FREQUENCY);
+const uAmplitude = uniform(AMPLITUDE);
+const uSpeed = uniform(SPEED);
+const uSteps = uniform(STEPS);
+const uDt = uniform(DT);
+
+// computeUpdate: advect with curl noise, compute mat4
+const computeUpdateFn = Fn(() => {
+  const pos = positionBuffer.element(instanceIndex).toVar();
+  const vel = velocityBuffer.element(instanceIndex);
+  const prevVel = prevVelocityBuffer.element(instanceIndex);
+
+  // Store previous velocity before computing new one
+  prevVel.assign(vel);
+
+  // Oscillating scale for grow/shrink effect
+  const scale = sin(time.mul(uSpeed)).mul(0.5).add(1.0);
+  const dt = float(uDt).mul(scale);
+
+  // Advect through curl noise field
+  Loop(int(uSteps), () => {
+    const v = curlNoise(pos, uFrequency, time.mul(0.05), uAmplitude, false);
+    pos.addAssign(v.mul(dt));
+  });
+
+  // Store current velocity
+  vel.assign(pos.sub(positionBuffer.element(instanceIndex)));
+
+  // Smooth direction from mix of prev and current velocity
+  const smoothDir = normalize(mix(prevVel, vel, 0.5).add(vec3(0.0001)));
+
+  // Compute and store mat4
+  matrixBuffer.element(instanceIndex).assign(buildLookAtMatrix(smoothDir, pos));
+
+  // Fake AO based on multiple factors:
+  // 1. Distance from center (darker at center where particles cluster)
+  const distFromCenter = length(pos);
+  const centerAo = float(1.0).sub(clamp(distFromCenter.div(5.0), 0.0, 1.0));
+
+  // 2. Vertical position (darker at bottom)
+  const heightAo = clamp(pos.z.div(4.8).add(0.5), 0.0, 1.0);
+
+  // 3. Velocity magnitude (slower = more clustered = darker)
+  const speed = length(vel);
+  const speedAo = float(1.0).sub(clamp(speed.mul(50.0), 0.0, 1.0));
+
+  // Combine AO factors
+  const ao = clamp(centerAo.oneMinus().mul(1).add(heightAo.mul(0.3)).add(speedAo.mul(0.3)), 0.0, 1.0);
+  aoBuffer.element(instanceIndex).assign(ao);
+
+  positionBuffer.element(instanceIndex).assign(pos);
+});
+
+computeUpdate = computeUpdateFn().compute(COUNT);
+
+// Material with direction-based coloring
+const material = new THREE.MeshPhysicalNodeMaterial({
+  metalness: 0.8,
+  roughness: 0.3
+});
+
+const vel = velocityBuffer.element(instanceIndex);
+const prevVel = prevVelocityBuffer.element(instanceIndex);
+
+// Color based on velocity direction
+const smoothDir = normalize(mix(prevVel, vel, 0.5).add(vec3(0.0001)));
+const colX = abs(smoothDir.x);
+const colY = abs(smoothDir.y);
+const colZ = abs(smoothDir.z);
+
+const cA = color(0x00ffff);  // cyan
+const cB = color(0xff00ff);  // magenta
+const cC = color(0xffff00);  // yellow
+
+material.colorNode = mix(mix(cA, cB, colX), cC, colY.add(colZ).mul(0.5));
+
+// Apply fake AO from buffer
+material.aoNode = aoBuffer.element(instanceIndex);
+
+// Mesh with small box geometry
+const geometry = new THREE.BoxGeometry(0.08, 0.28, 0.08);
+const mesh = new THREE.InstancedMesh(geometry, material, COUNT);
+
+// Use mat4 buffer directly for instance matrices
+mesh.instanceMatrix = matrixBuffer.value;
+scene.add(mesh);
+```
+
+Demo: https://three-blocks.com/docs/demos/curlnoise/
+
+---
+
+#### filmHD [TSL]
+**Kind:** Function
+
+```js
+import { filmHD } from '@three-blocks/core';
+```
+
+Cinematic film grain with blue noise, scanlines, and temporal stability.
+
+**Features**
+
+- Temporally stable grain (no flickering) using blue noise + white noise blend
+- Shadow-weighted grain (more visible in darks via `grainResponseNode`)
+- Animated scanlines for CRT/film look
+- Frame interpolation for smooth temporal evolution
+- Artist-friendly controls for all parameters
+
+**Algorithm**
+
+- Blends blue noise (65%) + white noise (35%) for quality grain
+- Per-frame jitter and rotation for temporal variation
+- Luminance-based weighting (darks get more grain)
+- Optional scanline overlay with sine wave
+
+##### Parameters
+- `inputNode`: `Node` - Source color buffer.
+- `options?`: `Object` = {} - Optional configuration nodes.
+- `options.intensityNode?`: `Node` - Grain intensity [0..1] (default: 0.82).
+- `options.grainScaleNode?`: `Node` - Grain density multiplier (default: 1.5).
+- `options.grainSpeedNode?`: `Node` - Temporal evolution speed (default: 12.0).
+- `options.grainResponseNode?`: `Node` - Shadow weighting [0..1] (default: 0.85).
+- `options.grainContrastNode?`: `Node` - Grain contrast multiplier (default: 1.25).
+- `options.scanlineIntensityNode?`: `Node` - Scanline blend amount [0..1] (default: 0.075).
+- `options.scanlineFrequencyNode?`: `Node` - Scanline frequency (default: 900.0).
+- `options.blueNoiseLevelNode?`: `Node` - Blue noise recursion level for quality.
+- `options.timeNode?`: `Node` - Override time input for animation control.
+- `options.uvNode?`: `Node` - Custom UV coordinates.
+
+Returns: `FilmHDNode` - Film grain effect node.
+
+##### Example
+
+```js
+import { filmHD } from '@three-blocks/core';
+import { pass, uniform } from 'three/tsl';
+
+const scenePass = pass(scene, camera);
+
+const grainEffect = filmHD(scenePass, {
+  intensityNode: uniform(0.8),      // Strong grain
+  grainScaleNode: uniform(1.5),     // Fine grain
+  grainSpeedNode: uniform(12.0),    // Moderate animation
+  grainResponseNode: uniform(0.85), // More grain in shadows
+  scanlineIntensityNode: uniform(0.075), // Subtle scanlines
+  scanlineFrequencyNode: uniform(900.0)
+});
+
+postProcessing.outputNode = grainEffect;
+```
+
+---
+
+#### fresnel [TSL]
+**Kind:** Function
+
+```js
+import { fresnel } from '@three-blocks/core';
+```
+
+Fresnel effect TSL function. Computes a view-dependent falloff based on the angle between surface normal and view direction.
+
+##### Parameters
+- `power?`: `Node.<float>` = 2.2 - Exponent controlling the falloff curve
+- `falloff?`: `Node.<float>` = 1.5 - Smoothstep range for the effect
+
+Returns: `Node.<float>` - Fresnel factor [0..1]
+
+##### Example
+
+```js
+import * as THREE from 'three/webgpu';
+import { float, color } from 'three/tsl';
+import { fresnel } from '@three-blocks/core';
+
+const material = new THREE.MeshStandardNodeMaterial({color: 0x111111});
+
+const rim = fresnel(float(3.5), float(0.9));
+const rimCol = color('#F5B700');
+material.emissiveNode = rimCol.mul(rim);
+```
+
+Demo: https://three-blocks.com/docs/demos/fresnel/
+
+---
+
+#### instanceCulling [TSL]
+**Kind:** Function
+
+```js
+import { instanceCulling } from '@three-blocks/core';
+```
+
+TSL function for creating an instance culling node that applies GPU-culled instance transforms to vertex positions and normals.
+
+This is the main entry point for enabling GPU culling in your material. The node automatically handles the indirection from draw index to original instance ID.
+
+**Example: Basic GPU frustum culling**
+
+##### Parameters
+- `culler`: `ComputeInstanceCulling` - The GPU instance culler.
+
+Returns: `InstanceCullingNode` - Node that applies culled instance transforms.
+
+##### Example
+
+```js
+import { ComputeInstanceCulling } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Create instanced mesh with 100,000 instances
+const geometry = new THREE.BoxGeometry(1, 1, 1);
+const material = new THREE.MeshStandardNodeMaterial();
+const mesh = new THREE.InstancedMesh(geometry, material, 100000);
+
+// Scatter instances randomly
+const matrix = new THREE.Matrix4();
+for (let i = 0; i < 100000; i++) {
+  matrix.makeTranslation(
+    (Math.random() - 0.5) * 1000,
+    (Math.random() - 0.5) * 100,
+    (Math.random() - 0.5) * 1000
+  );
+  mesh.setMatrixAt(i, matrix);
+}
+
+// Create GPU culler
+const culler = new ComputeInstanceCulling(mesh, renderer);
+
+// Culling patch is applied automatically to material.setupPosition()
+// so you can keep using positionNode normally.
+
+scene.add(mesh);
+```
+
+---
+
+#### instanceCullingIndex [TSL]
+**Kind:** Function
+
+```js
+import { instanceCullingIndex } from '@three-blocks/core';
+```
+
+TSL function that returns the culled instance ID for the current draw call. Unlike `instanceIndex` which gives the draw index (0 to survivorCount), this returns the actual original instance ID from the culled set.
+
+Use this in custom material nodes when you need to access per-instance data from the original instance arrays, such as:
+
+- Per-instance random values (via hash)
+- Animation offsets
+- Custom attribute lookups
+
+**Example: Per-instance rotation with stable IDs**
+
+**Example: Custom per-instance data lookup**
+
+```js
+import { instanceCullingIndex } from '@three-blocks/core';
+import { storage, vec3 } from 'three/tsl';
+
+// Custom per-instance colors stored in a storage buffer
+const colorBuffer = new THREE.StorageBufferAttribute(colors, 3);
+const colorStorage = storage(colorBuffer, 'vec3', instanceCount);
+
+// Look up color using original instance ID
+const originalId = instanceCullingIndex(culler);
+material.colorNode = colorStorage.element(originalId);
+```
+
+##### Parameters
+- `culler`: `ComputeInstanceCulling` - The GPU instance culler.
+
+Returns: `Node.<uint>` - The culled instance ID node.
+
+##### Example
+
+```js
+import { ComputeInstanceCulling, instanceCulling, instanceCullingIndex } from '@three-blocks/core';
+import { Fn, hash, time, rotate, positionLocal, normalLocal, transformNormalToView } from 'three/tsl';
+import * as THREE from 'three/webgpu';
+
+const mesh = new THREE.InstancedMesh(geometry, material, 10000);
+const culler = new ComputeInstanceCulling(mesh, renderer);
+
+// Get the original instance ID (stable across culling changes)
+const originalId = instanceCullingIndex(culler);
+
+// Create per-instance rotation that persists when instances are culled/unculled
+const randomOffset = hash(originalId).mul(Math.PI * 2);
+const angle = time.mul(0.5).add(randomOffset);
+
+// Apply rotation before instance transform, then cull
+material.positionNode = Fn(() => {
+  positionLocal.assign(rotate(positionLocal, angle));
+  normalLocal.assign(rotate(normalLocal, angle));
+  instanceCulling(culler).toStack();
+  return positionLocal;
+})();
+material.normalNode = transformNormalToView(normalLocal).normalize();
+```
+
+---
+
+#### instanceCullingMatrix [TSL]
+**Kind:** Function
+
+```js
+import { instanceCullingMatrix } from '@three-blocks/core';
+```
+
+Fetch the instance matrix for a culled instance.
+
+Use this when you need the per-instance matrix in custom nodes without manually indexing `refMatNode`.
+
+**Example: Extract world position**
+
+##### Parameters
+- `culler`: `ComputeInstanceCulling` - The GPU instance culler.
+- `idNode?`: `Node.<int>` - Optional instance id node. Defaults to culled id.
+
+Returns: `Node.<mat4>` - Instance matrix for the culled instance.
+
+##### Example
+
+```js
+import { instanceCullingMatrix } from '@three-blocks/core';
+import { vec3 } from 'three/tsl';
+
+const M = instanceCullingMatrix(culler);
+const worldPos = vec3(M[3].x, M[3].y, M[3].z);
+```
+
+---
+
+#### kuwahara [TSL]
+**Kind:** Function
+
+```js
+import { kuwahara } from '@three-blocks/core';
+```
+
+Generalized anisotropic Kuwahara painterly filter with multi-sector sampling.
+
+**Algorithm**
+
+- Evaluates angular sectors around each pixel
+- Structure tensor drives dominant orientation, coherence, and anisotropic scaling
+- Selects sector with minimum variance for painterly effect
+- More sectors/angle steps = smoother results but slower performance
+- Using the structure tensor aligns the brush with image edges (high coherence) and reduces smearing across strong gradients; disabling it falls back to isotropic blurring.
+
+**Performance Tuning**
+
+- Increase `stepSize` for sparse sampling (large radius with similar sample count)
+- Reduce `sectors` or `angleSteps` for speed
+- Enable `useSimpleWeight` for flatter look with fewer math ops
+
+**Debug Output**
+
+- R: Selected sector id (0..1)
+- G: Edge coherence from structure tensor
+- B: Normalized variance (higher = noisier)
+
+##### Parameters
+- `originalTextureNode`: `Node` - Source texture to filter.
+- `tensorTextureNode`: `Node` - Structure tensor texture (from `structureTensor()`).
+- `options?`: `Object` = {} - Optional parameters.
+- `options.radius?`: `number` = 6 - Filter radius in pixels (brush size).
+- `options.sectors?`: `number` = 8 - Number of angular sectors (more = smoother, slower).
+- `options.angleSteps?`: `number` = 3 - Discrete angle steps per sector (angular smoothness).
+- `options.useSimpleWeight?`: `boolean` = false - Use flat weighting instead of smooth polynomial falloff.
+- `options.stepSize?`: `number` = 1 - Sparse sampling step (1=dense, >1=sparser/faster).
+- `options.useTensor?`: `boolean` = true - Use structure tensor for orientation; when false, falls back to isotropic filtering.
+- `options.debug?`: `boolean` = false - Debug output (R=selected sector, G=edge coherence, B=variance).
+
+Returns: `Node.<vec4>` - Filtered painterly color.
+
+##### Example
+
+```js
+import { kuwahara, structureTensor } from '@three-blocks/core';
+import { pass } from 'three/tsl';
+
+const scenePass = pass(scene, camera);
+const tensorPass = structureTensor(scenePass);
+
+const painterly = kuwahara(scenePass, tensorPass, {
+  radius: 6,
+  sectors: 8,
+  angleSteps: 3,
+  stepSize: 1
+});
+```
+
+See also: structureTensor
+
+---
+
+#### parallaxOcclusion [TSL]
+**Kind:** Function
+
+```js
+import { parallaxOcclusion } from '@three-blocks/core';
+```
+
+Parallax Occlusion Mapping (POM) node for high-quality surface displacement.
+
+**Algorithm**
+
+- Ray-marches through displacement texture along view direction
+- Adaptive sampling: more samples at grazing angles
+- Binary search refinement for sub-texel precision
+- Blue noise jittering to eliminate banding artifacts
+- Edge fading prevents UV stretching at borders
+- Computes depth offset for correct depth buffer integration
+
+**Benefits**
+
+- Creates deep surface detail without tessellation
+- Accurate self-shadowing and occlusion
+- Smooth interpolation via binary refinement
+- Perceptually uniform with blue noise sampling
+- Automatic LOD via adaptive sample count
+
+##### Parameters
+- `v_uv`: `Node.<vec2>` - UV coordinates node.
+- `dispTex`: `Node.<Texture>` - Displacement/height map texture (white=raised, black=recessed).
+- `parallaxScale?`: `Node.<float>` = 0.05 - Scale factor controlling depth of parallax effect.
+- `blueNoiseTex?`: `Node.<Texture> | null` = null - Optional blue noise texture for jitter (reduces banding).
+- `minSamples?`: `Node.<int>` = 24 - Minimum ray-march samples (used at perpendicular view).
+- `maxSamples?`: `Node.<int>` = 96 - Maximum ray-march samples (used at grazing angles).
+- `refineSteps?`: `Node.<int>` = 3 - Binary search refinement iterations for precision.
+- `edgeMargin?`: `Node.<float>` = 0.02 - UV margin for edge fade (prevents stretching).
+
+Returns: `Node.<vec3>` - Displaced UV coordinates (xy) and depth pixel offset (z).
+
+##### Example
+
+```js
+import { parallaxOcclusion } from '@three-blocks/core';
+import { texture, uv } from 'three/tsl';
+
+const material = new MeshStandardNodeMaterial();
+const heightMap = texture(heightTexture);
+const blueNoise = texture(blueNoiseTexture);
+
+// Apply POM to displace UVs
+const result = parallaxOcclusion(
+  uv(),
+  heightMap,
+  0.08,        // parallax depth scale
+  blueNoise,   // optional noise for quality
+  32,          // min samples
+  128,         // max samples
+  4            // refinement steps
+);
+
+// Use displaced UVs for texture sampling
+material.colorNode = texture(diffuseTex, result.xy);
+material.normalNode = normalMap(texture(normalTex, result.xy));
+```
+
+See also: {@link https://web.archive.org/web/20150419215321/http://sunandblackcat.com/tipFullView.php?l=eng&topicid=28}, {@link https://learnopengl.com/Advanced-Lighting/Parallax-Mapping}
+
+---
+
+#### shadowMapFastNoise [TSL]
+**Kind:** Function
+
+```js
+import { shadowMapFastNoise } from '@three-blocks/core';
+```
+
+Fast shadow map filtering using spatial noise and Poisson disk sampling.
+
+**Algorithm**
+
+- Generates 2 Poisson disk samples per fragment
+- Uses world-position-based noise to rotate sample pattern
+- Reduces banding artifacts with minimal performance cost
+- Provides softer shadow edges than standard PCF
+
+**Usage**
+
+**Performance**
+
+- Only 2 shadow map samples per fragment (vs 4-16 for standard PCF)
+- Noise rotation provides perceptual quality of more samples
+- Suitable for real-time applications
+
+##### Parameters
+- `params`: `Object` - Shadow sampling parameters.
+- `params.depthTexture`: `Node.<Texture>` - Shadow depth texture.
+- `params.shadowCoord`: `Node.<vec4>` - Projected shadow coordinates.
+- `params.shadow`: `Object` - Shadow reference object containing `mapSize`.
+
+Returns: `Node.<float>` - Shadow factor in [0..1] (0=fully shadowed, 1=fully lit).
+
+##### Example
+
+```js
+import { shadowMapFastNoise } from '@three-blocks/core';
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.castShadow = true;
+dirLight.shadow.filterNode = shadowMapFastNoise;
+```
+
+---
+
+#### smoke [TSL]
+**Kind:** Function
+
+```js
+import { smoke } from '@three-blocks/core';
+```
+
+Smoke Simulation (TSL) – a 2D velocity–pressure solver that runs in screen space.
+
+Turns a fullscreen pass into a stylized, real-time smoke/ink flow using WebGPU compute through Three.js TSL. Uses StorageTexture resources and takes advantage of Tier2 read–write access whenever the adapter exposes it. It owns and ping-pongs its internal textures (velocity, pressure, density, curl, divergence) and updates itself every frame when used in a PostProcessing chain.
+
+**Features**
+
+- Semi-Lagrangian advection for velocity and density
+- Vorticity confinement (curl) and divergence-free projection (pressure solve)
+- Configurable dissipation, pressure iterations and curl strength
+- Optional pointer-driven splats via a `vec2` uniform (no global dispatcher)
+- Drop-in for post-processing: `postProcessing.outputNode = smoke(pointer, 128, 512, ...)`
+
+**Example: Basic postprocessing setup**
+
+**Example: Interactive pointer-driven splats**
+
+```js
+import * as THREE from 'three/webgpu';
+import { smoke } from '@three-blocks/core';
+
+const pointer = new THREE.Vector2();
+
+// Pass pointer as first argument - motion automatically injects splats
+const fluidNode = smoke(pointer, 128, 512, 3, 0.97, 0.98, 0.8, 20, 0.2, 0.1, true, 45);
+
+// Update pointer on mouse move (NDC coordinates: -1 to +1)
+document.addEventListener('mousemove', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+});
+```
+
+##### Parameters
+- `pointer?`: `THREE.Vector2` - NDC-like pointer in [-1, 1]; when present, motion injects splats.
+- `simRes?`: `number` = 128 - Square resolution for velocity/pressure buffers.
+- `dyeRes?`: `number` = 512 - Square resolution for density buffer.
+- `iterations?`: `number` = 3 - Pressure Jacobi iterations per solve.
+- `densityDissipation?`: `number` = 0.97 - Density dissipation factor in [0, 1].
+- `velocityDissipation?`: `number` = 0.98 - Velocity dissipation factor in [0, 1].
+- `pressureDissipation?`: `number` = 0.8 - Damp factor for pressure clear step.
+- `curlStrength?`: `number` = 20 - Vorticity confinement scale.
+- `pressureFactor?`: `number` = 0.2 - Pressure factor constant in Jacobi updates.
+- `radius?`: `number` = 0.1 - Gaussian splat radius in UV^2. Increase for larger splats.
+- `useBoundaries?`: `boolean` = true - Mirror-velocity boundary conditions at screen edges.
+- `pointerScale?`: `number` = 45 - Multiplier applied to pointer delta when generating splats.
+- `neighborStride?`: `number` = 1 - Multiplier for curl/divergence/pressure neighbor texel offsets.
+- `speedFactor?`: `number` = 1 - Scales sub-stepping relative to frame time (lower = more substeps).
+
+Returns: `Node` - Color node sampling the current dye texture of the fluid simulation.
+
+##### Example
+
+```js
+import * as THREE from 'three/webgpu';
+import { smoke } from '@three-blocks/core';
+
+const renderer = new THREE.WebGPURenderer();
+await renderer.init();
+
+const postProcessing = new THREE.PostProcessing(renderer);
+const pointer = new THREE.Vector2();
+
+// smoke(pointer, simRes, dyeRes, iterations, densityDissipation, velocityDissipation,
+//       pressureDissipation, curlStrength, pressureFactor, radius, useBoundaries, pointerScale)
+const fluidNode = smoke(pointer, 128, 512, 3, 0.97, 0.98, 0.8, 20, 0.2, 0.1, true, 45);
+
+postProcessing.outputNode = fluidNode;
+
+renderer.setAnimationLoop(() => postProcessing.render());
+```
+
+Demo: https://three-blocks.com/docs/demos/fluid/
+
+---
+
+#### smokeRTT [TSL]
+**Kind:** Function
+
+```js
+import { smokeRTT } from '@three-blocks/core';
+```
+
+Smoke RTT Simulation (TSL) – a 2D velocity–pressure solver using RenderTargets.
+
+This is an RTT-based variant of the smoke simulation that uses RenderTarget + fragment shaders instead of StorageTexture + compute shaders. This provides broader WebGPU compatibility as it doesn't require Tier2 read-write storage texture support.
+
+The API is identical to `smoke()` - drop-in replacement for environments without Tier2 support.
+
+**Features**
+
+- Semi-Lagrangian advection for velocity and density
+- Vorticity confinement (curl) and divergence-free projection (pressure solve)
+- Configurable dissipation, pressure iterations and curl strength
+- Optional pointer-driven splats via a `vec2` uniform
+- Drop-in for post-processing: `postProcessing.outputNode = smokeRTT(pointer, 128, 512, ...)`
+
+**Example: Basic postprocessing setup**
+
+**Example: Interactive pointer-driven splats**
+
+```js
+import * as THREE from 'three/webgpu';
+import { smokeRTT } from '@three-blocks/core';
+
+const pointer = new THREE.Vector2();
+
+// Pass pointer as first argument - motion automatically injects splats
+const fluidNode = smokeRTT(pointer, 128, 512, 3, 0.97, 0.98, 0.8, 20, 0.2, 0.1, true, 45);
+
+// Update pointer on mouse move (NDC coordinates: -1 to +1)
+document.addEventListener('mousemove', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+});
+```
+
+##### Parameters
+- `pointer?`: `THREE.Vector2` - NDC-like pointer in [-1, 1]; when present, motion injects splats.
+- `simRes?`: `number` = 128 - Square resolution for velocity/pressure buffers.
+- `dyeRes?`: `number` = 512 - Square resolution for density buffer.
+- `iterations?`: `number` = 3 - Pressure Jacobi iterations per solve.
+- `densityDissipation?`: `number` = 0.97 - Density dissipation factor in [0, 1].
+- `velocityDissipation?`: `number` = 0.98 - Velocity dissipation factor in [0, 1].
+- `pressureDissipation?`: `number` = 0.8 - Damp factor for pressure clear step.
+- `curlStrength?`: `number` = 20 - Vorticity confinement scale.
+- `pressureFactor?`: `number` = 0.2 - Pressure factor constant in Jacobi updates.
+- `radius?`: `number` = 0.1 - Gaussian splat radius in UV^2. Increase for larger splats.
+- `useBoundaries?`: `boolean` = true - Mirror-velocity boundary conditions at screen edges.
+- `pointerScale?`: `number` = 45 - Multiplier applied to pointer delta when generating splats.
+- `neighborStride?`: `number` = 1 - Multiplier for curl/divergence/pressure neighbor texel offsets.
+- `speedFactor?`: `number` = 1 - Scales sub-stepping relative to frame time (lower = more substeps).
+
+Returns: `Node` - Color node sampling the current dye texture of the fluid simulation.
+
+##### Example
+
+```js
+import * as THREE from 'three/webgpu';
+import { smokeRTT } from '@three-blocks/core';
+
+const renderer = new THREE.WebGPURenderer();
+await renderer.init();
+
+const postProcessing = new THREE.PostProcessing(renderer);
+const pointer = new THREE.Vector2();
+
+// smokeRTT(pointer, simRes, dyeRes, iterations, densityDissipation, velocityDissipation,
+//          pressureDissipation, curlStrength, pressureFactor, radius, useBoundaries, pointerScale)
+const fluidNode = smokeRTT(pointer, 128, 512, 3, 0.97, 0.98, 0.8, 20, 0.2, 0.1, true, 45);
+
+postProcessing.outputNode = fluidNode;
+
+renderer.setAnimationLoop(() => postProcessing.render());
+```
+
+Demo: https://three-blocks.com/docs/demos/fluid/
+
+---
+
+#### structureTensor [TSL]
+**Kind:** Function
+
+```js
+import { structureTensor } from '@three-blocks/core';
+```
+
+Compute structure tensor for edge-aware image filtering.
+
+**Algorithm**
+
+- Computes image gradients using Sobel operator (3×3 kernel)
+- Calculates outer product of gradient: `J = [∇I ⊗ ∇I]`
+- Outputs (Jxx, Jyy, Jxy) in RGB channels for downstream use
+
+**Use Cases**
+
+- Input for Kuwahara filter (`kuwahara`)
+- Edge detection and orientation analysis
+- Anisotropic filtering and diffusion
+
+**Pipeline** Structure tensor is typically used as a first pass before applying edge-aware filters like Kuwahara.
+
+##### Parameters
+- `textureNode`: `Node` - Source texture for gradient analysis.
+
+Returns: `Node.<vec4>` - Structure tensor (Jxx, Jyy, Jxy, 1.0) in RGBA.
+
+##### Example
+
+```js
+import { structureTensor, kuwahara } from '@three-blocks/core';
+import { pass } from 'three/tsl';
+
+// First pass: compute structure tensor
+const scenePass = pass(scene, camera);
+const tensorPass = structureTensor(scenePass);
+
+// Second pass: use tensor for edge-aware filtering
+const filtered = kuwahara(scenePass, tensorPass, { radius: 5 });
+
+postProcessing.outputNode = filtered;
+```
+
+See also: kuwahara
+
+---
+
+#### traaHD [TSL]
+**Kind:** Function
+
+```js
+import { traaHD } from '@three-blocks/core';
+```
+
+Temporal Reprojection Anti-Aliasing for high-quality edge smoothing with motion.
+
+**Algorithm**
+
+- Jitters camera each frame (32-sample Halton sequence)
+- Reprojects previous frame using velocity buffer
+- Clamps history to 3×3 neighborhood min/max (reduces ghosting)
+- Blends current frame with clamped history (adaptive blending)
+- Depth-based rejection for disoccluded pixels
+
+**Features**
+
+- Excellent edge quality (rivals MSAA/SSAA)
+- Temporal stability (no flickering)
+- Motion-aware blending (reduces trails)
+- Disocclusion handling (depth-based rejection)
+- Optional super-resolution mode (>1x output resolution)
+
+**Requirements**
+
+- Velocity buffer (built-in with Three.js WebGPU)
+- Depth buffer
+- Post-processing pipeline
+
+##### Parameters
+- `beautyNode`: `Node` - Scene color texture (from pass).
+- `depthNode`: `Node` - Scene depth texture.
+- `velocityNode`: `Node` - Scene velocity texture (motion vectors).
+- `camera`: `THREE.Camera` - Active camera (receives jitter).
+
+Returns: `TRAANodeHD` - TRAA effect node with `.superResolutionScale` property.
+
+##### Example
+
+```js
+import { traaHD } from '@three-blocks/core';
+import { velocity, pass } from 'three/tsl';
+
+// Setup post-processing with TRAA
+const scenePass = pass(scene, camera);
+const scenePassVelocity = scenePass.getTextureNode('velocity');
+const scenePassDepth = scenePass.getTextureNode('depth');
+
+const traa = traaHD(
+  scenePass,
+  scenePassDepth,
+  scenePassVelocity,
+  camera
+);
+
+// Optional: enable super-resolution (experimental)
+traa.superResolutionScale = 1.5; // 1.5x output resolution
+
+postProcessing.outputNode = traa;
+```
+
+See also: {@link https://alextardif.com/TAA.html}, {@link https://www.elopezr.com/temporal-aa-and-the-quest-for-the-holy-trail/}
+
+---
+
+### Geometries
+
+Custom geometry classes for specialized rendering.
+
+#### BirdGeometry
+**Kind:** Class
+
+```js
+import { BirdGeometry } from '@three-blocks/core';
+```
+
+Low-poly bird geometry for instanced flocking simulations. Matches the bird model from three.js WebGPU compute birds example.
+
+**Structure**
+
+- 3 triangles: body, left wing, right wing
+- Total 9 vertices (3 per triangle)
+
+**Vertex Layout**
+
+- Vertices 0-2: Body (center tail to head)
+- Vertices 3-5: Left wing
+- Vertices 6-8: Right wing
+
+Extends: THREE.BufferGeometry
+
+##### Example
+
+```js
+import { BirdGeometry } from '@three-blocks/core';
+import { InstancedMesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { If, vertexIndex, sin } from 'three/tsl';
+
+const geometry = new BirdGeometry();
+const material = new MeshStandardNodeMaterial({ color: 0x0088ff });
+
+// Animate wing flapping in vertex shader
+material.positionNode = Fn(() => {
+  const pos = positionLocal.toVar();
+  // Wing vertices (4,7) flap with phase
+  If(vertexIndex.equal(4).or(vertexIndex.equal(7)), () => {
+    pos.y = sin(phaseUniform).mul(5.0);
+  });
+  return pos;
+})();
+
+const birds = new InstancedMesh(geometry, material, 1000);
+scene.add(birds);
+```
+
+See also: Boids
+
+---
+
+#### BoxNoFaceGeometry
+**Kind:** Class
+
+```js
+import { BoxNoFaceGeometry } from '@three-blocks/core';
+```
+
+Wireframe box geometry with explicit edge pairs for line rendering. Renders only the 12 edges of a box without any faces.
+
+**Architecture**
+
+- 24 vertices (2 per edge) for clean LINE_SEGMENTS rendering
+- No indices - direct vertex pairs
+- Pre-computed bounds for efficient culling
+
+**Use Cases**
+
+- Bounding box visualization
+- Debug wireframe overlays
+- Minimalist architectural elements
+- Selection indicators
+
+Extends: THREE.BufferGeometry
+
+##### Example
+
+```js
+import { BoxNoFaceGeometry } from '@three-blocks/core';
+import { LineSegments, LineBasicMaterial } from 'three/webgpu';
+
+// Visualize a bounding box
+const boxGeo = new BoxNoFaceGeometry(10, 5, 8);
+const boxMat = new LineBasicMaterial({ color: 0x00ff00 });
+const wireframe = new LineSegments(boxGeo, boxMat);
+scene.add(wireframe);
+
+// Animate with transform
+wireframe.position.set(0, 2.5, 0);
+wireframe.rotation.y = Math.PI / 4;
+```
+
+---
+
+#### TriangleGeometry
+**Kind:** Class
+
+```js
+import { TriangleGeometry } from '@three-blocks/core';
+```
+
+Single large triangle covering NDC space for fullscreen post-processing.
+
+**Purpose**
+
+- Efficient fullscreen pass geometry (1 triangle vs 2 for quad)
+- Covers entire screen in clip space: (-1,-1) to (3,-1) to (-1,3)
+- Eliminates center seam artifact present in traditional screen quads
+
+**Usage**
+
+Extends: THREE.BufferGeometry
+
+##### Example
+
+```js
+import { TriangleGeometry } from '@three-blocks/core';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { pass, screenUV } from 'three/tsl';
+
+// Fullscreen post-processing
+const scenePass = pass(scene, camera);
+const postGeo = new TriangleGeometry();
+const postMat = new MeshBasicNodeMaterial();
+postMat.colorNode = scenePass.mul(0.5); // Darken scene
+
+const postMesh = new Mesh(postGeo, postMat);
+postMesh.frustumCulled = false;
+```
+
+---
+
+### Materials
+
+Node-based materials with advanced features.
+
+#### GaussianSplatsMaterial
+**Kind:** Class
+
+```js
+import { GaussianSplatsMaterial } from '@three-blocks/core';
+```
+
+Custom NodeMaterial for rendering Gaussian Splats.
+
+This material handles:
+
+- Billboard quad generation from sorted splat indices
+- Ellipse computation from 2D covariance matrix
+- Gaussian alpha falloff evaluation
+- Proper alpha blending for transparency
+
+Extends: NodeMaterial
+
+##### Properties
+- `isGaussianSplatsMaterial`: `any` - Flag for type checking.
+- `customPositionNode`: `any` - Custom position modifier node - takes (position, splatIdx) returns modified position
+- `lightingMode`: `any` - Get the current lighting mode.
+- `lightingMode`: `any` - Set the lighting mode. 'unlit': DC + SH combined as emissive (no PBR lighting, default) 'lit': DC as diffuse albedo (colorNode), SH as specular color (specularColorNode) In lit mode, DC receives diffuse lights and envmap, while SH drives specular highlights.
+- `alphaClip`: `any` - Get the current alpha clip threshold.
+- `alphaClip`: `any` - Set the alpha clip threshold for per-splat culling. Splats with base opacity below this value are entirely discarded. Higher values = fewer outlier splats but may lose detail. Lower values = more detail but may show stray splats.
+- `minPixelRadius`: `any` - Get the minimum pixel radius for splats.
+- `minPixelRadius`: `any` - Set the minimum pixel radius for splats. Splats smaller than this are culled to remove noise.
+- `maxPixelRadius`: `any` - Get the maximum pixel radius for splats.
+- `maxPixelRadius`: `any` - Set the maximum pixel radius for splats. Prevents extremely large splats from dominating the scene.
+- `globalOpacity`: `any` - Get the global opacity multiplier.
+- `globalOpacity`: `any` - Set the global opacity multiplier. Scales all splat opacities uniformly.
+- `sigmaCoverage`: `any` - Get the sigma coverage value.
+- `sigmaCoverage`: `any` - Set the sigma coverage for splat quad size. Controls how many standard deviations the quad covers. 2.0: SuperSplat default (optimal visual quality) 3.0: Standard 3DGS (covers 99.7% of Gaussian, more overdraw)
+- `adaptiveSigma`: `any` - Get whether adaptive sigma is enabled. When enabled, small splats get reduced quad size to minimize overdraw.
+- `adaptiveSigma`: `any` - Set whether adaptive sigma is enabled. When enabled, splats smaller than adaptiveSigmaThreshold get reduced quad size. This reduces overdraw for scenes with many small splats.
+- `adaptiveSigmaThreshold`: `any` - Get the adaptive sigma threshold in pixels.
+- `adaptiveSigmaThreshold`: `any` - Set the adaptive sigma threshold in pixels. Splats with screen radius below this threshold get progressively smaller quads.
+- `exposure`: `any` - Get the current exposure value.
+- `exposure`: `any` - Set the exposure (brightness multiplier).
+- `contrast`: `any` - Get the current contrast value.
+- `contrast`: `any` - Set the contrast adjustment.
+- `saturation`: `any` - Get the current saturation value.
+- `saturation`: `any` - Set the saturation adjustment.
+- `vibrance`: `any` - Get the current vibrance value.
+- `vibrance`: `any` - Set the vibrance (selective saturation for muted colors).
+- `highlights`: `any` - Get the current highlights adjustment.
+- `highlights`: `any` - Set the highlights adjustment.
+- `shadows`: `any` - Get the current shadows adjustment.
+- `shadows`: `any` - Set the shadows adjustment (lift dark areas).
+- `shStrength`: `any` - Get the SH strength multiplier.
+- `shStrength`: `any` - Set the SH strength - controls view-dependent color intensity.
+- `alphaBoost`: `any` - Get the alpha boost value.
+- `alphaBoost`: `any` - Set the alpha boost - increases splat opacity via power function. Higher values make splats more opaque, reducing see-through artifacts.
+- `shSpecularIntensity`: `any` - Get the SH specular intensity for lit mode.
+- `shSpecularIntensity`: `any` - Set the SH specular intensity for lit mode. Controls how much SH contributes to specular highlights.
+- `roughness`: `any` - Get the surface roughness for lit mode PBR.
+- `roughness`: `any` - Set the surface roughness for lit mode PBR.
+- `metalness`: `any` - Get the surface metalness for lit mode PBR.
+- `metalness`: `any` - Set the surface metalness for lit mode PBR.
+- `premultiplied`: `any` - Get whether color premultiplication is enabled.
+- `premultiplied`: `any` - Set whether to premultiply color by alpha in unlit mode. When true (default), colors are multiplied by opacity for correct alpha blending. Set to false if using custom blend modes that expect non-premultiplied colors.
+
+##### Methods
+
+###### applyPreset(presetName)
+Apply a preset configuration.
+Parameters:
+- `presetName`: `string` - Name of the preset (e.g., 'CINEMATIC', 'VIBRANT').
+
+###### dispose()
+Dispose of material resources.
+
+---
+
+#### MeshTransmissionNodeMaterial
+**Kind:** Class
+
+```js
+import { MeshTransmissionNodeMaterial } from '@three-blocks/core';
+```
+
+Constructs a new transmission node material. Use `setValues(parameters)` to override properties; see property docs below.
+
+Extends: THREE.MeshPhysicalNodeMaterial
+
+##### Constructor Parameters
+- `parameters?`: `Object` = {} - Optional material parameters.
+- `parameters.chromaticAberration?`: `number` = 0.4 - Strength of per-channel IOR dispersion.
+- `parameters.anisotropicBlur?`: `number` = 0.38 - Minimum smear in the thickness direction for rough surfaces.
+- `parameters.time?`: `number` = 0 - Time uniform used by temporal distortion.
+- `parameters.distortion?`: `number` = 0 - Distortion amount applied to the refraction normal via noise; scales amplitude, 0 disables.
+- `parameters.distortionScale?`: `number` = 0 - Distortion noise scale in world units.
+- `parameters.temporalDistortion?`: `number` = 0 - Strength of time-based distortion animation.
+- `parameters.ditherStrength?`: `number` = 0.5 - Blue-noise jitter strength for sampling stability.
+- `parameters.ditherScale?`: `number` = 128 - Blue-noise tiling frequency (higher values tile smaller).
+- `parameters.color?`: `THREE.Color | string | number` = 0xffffff - Base albedo color.
+- `parameters.viewportBuffer?`: `*` = null - Optional TSL sampler/texture node used to sample the scene; defaults to renderer viewport mip texture.
+
+##### Properties
+- `isMeshTransmissionNodeMaterial`: `boolean` (default: true) - This flag can be used for type testing.
+- `forceSinglePass`: `boolean` (default: true) - Render in a single pass. Yield better visual and performance results when sampling the backdrop texture.
+- `chromaticAberration`: `number` (default: 0.4) - Strength of per-channel IOR dispersion. Higher values increase color fringing.
+- `transmissionMap`: `THREE.Texture | null` (default: null) - Optional map kept for API parity with other materials. Not sampled by this material.
+- `attenuationDistance`: `number` (default: Infinity) - Beer–Lambert attenuation distance; set to `Infinity` to disable attenuation.
+- `anisotropicBlur`: `number` (default: 0.38) - Minimum smear in the thickness direction for rough surfaces.
+- `time`: `number` (default: 0) - Time value used for temporal distortion animation.
+- `distortion`: `number` (default: 0) - Distortion amount applied to the perturbed refraction normal via noise. Values scale the noise amplitude; 0 disables the effect.
+- `distortionScale`: `number` (default: 0) - Distortion noise scale in world units.
+- `temporalDistortion`: `number` (default: 0) - Strength of time-based distortion animation.
+- `ditherStrength`: `number` (default: 0.5) - Blue-noise jitter strength for sampling stability.
+- `ditherScale`: `number` (default: 128) - Blue-noise tiling frequency (higher values tile smaller).
+- `viewportBuffer`: `*` (default: null) - Optional TSL sampler/texture node used to sample the scene/backdrop. If `null`, the renderer's viewport mip texture is used.
+- `backdropNode`: `*` - Backdrop refraction node injected into the physical transmission pipeline.
+
+##### Methods
+
+###### attachGUI(gui)
+Attaches a debug UI for tuning transmission parameters. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `gui`: `*` - GUI instance (e.g., lil-gui/dat.gui or renderer.inspector.createParameters()).
+Returns: `void`
+
+###### disposeGUI()
+Destroys and clears the debug folder if attached.
+Returns: `this`
+
+###### dispose()
+Disposes material resources and detaches any debug UI.
+
+##### Example
+
+```js
+import { MeshTransmissionNodeMaterial } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Create transmission material
+const mat = new MeshTransmissionNodeMaterial({
+  color: new THREE.Color('#ffffff'),
+  roughness: 0.2,
+  thickness: 0.5,
+  ior: 1.5,
+  chromaticAberration: 0.4,
+  anisotropicBlur: 0.1,
+  distortion: 0.0,
+  attenuationDistance: 0.5,
+  attenuationColor: new THREE.Color('#ffffff')
+});
+
+const geometry = new THREE.TorusKnotGeometry(1, 0.4, 128, 32);
+const mesh = new THREE.Mesh(geometry, mat);
+scene.add(mesh);
+```
+
+Demo: https://three-blocks.com/docs/demos/mesh-transmission/
+
+---
+
+### Meshes
+
+Specialized mesh classes with GPU optimizations.
+
+#### GridPristine
+**Kind:** Class
+
+```js
+import { GridPristine } from '@three-blocks/core';
+```
+
+Infinite grid mesh with anti-aliased lines and dual-layer composition.
+
+**Features**
+
+- Two independent grid layers (A and B) with configurable cell size, width, color, and opacity
+- Analytic derivative-based rendering keeps line thickness stable across all zoom levels
+- World-space positioning using positionWorld (grid doesn't move with camera)
+- Smooth anti-aliasing at any distance or angle
+- Full TSL/NodeMaterial implementation for WebGPU compatibility
+
+**Rendering**
+
+- Uses fragment shader derivatives (dFdx/dFdy) to compute pixel-space line width
+- Lines automatically adapt thickness based on screen-space density
+- Composite blend: background → layer B → layer A
+- No texture lookups or geometry subdivision required
+
+**Use Cases**
+
+- Scene reference grids with major/minor divisions
+- CAD/3D editor floor grids
+- Architectural visualization ground planes
+- Debug visualizations requiring stable grid lines
+
+Extends: THREE.Mesh
+
+##### Methods
+
+###### attachGUI(gui)
+Attach a GUI folder with common controls. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `gui`: `*` - GUI instance (e.g., lil-gui/dat.gui or renderer.inspector.createParameters()).
+Returns: `GridPristine`
+
+###### disposeGUI()
+Detach and destroy the GUI folder.
+Returns: `GridPristine`
+
+###### dispose()
+Dispose GPU resources and detach GUI.
+Returns: `void`
+
+##### Example
+
+```js
+import { GridPristine } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Basic grid with default settings
+const grid = new GridPristine();
+scene.add(grid);
+```
+
+Demo: https://three-blocks.com/docs/demos/grid-pristine/
+
+---
+
+### Animation
+
+GPU-accelerated animation systems using baked texture data.
+
+#### AnimationBakeLoader
+**Kind:** Class
+
+```js
+import { AnimationBakeLoader } from '@three-blocks/core';
+```
+
+Loader for baked animation textures (VAT/OAT). Given a base URL (or a URL ending with .exr or .json), it loads the EXR texture and its paired JSON metadata, then constructs and returns an initialized AnimationBakeMixer.
+
+URL resolution rules:
+
+- If the URL ends with .exr, the JSON URL is derived by replacing with .json.
+- If the URL ends with .json, the EXR URL is derived by replacing with .exr.
+- Otherwise, ".exr" and ".json" are used.
+
+Extends: Loader
+
+##### Methods
+
+###### load(url, onLoad?, onProgress?, onError?)
+Load an EXR and its paired JSON metadata and return an initialized AnimationBakeMixer.
+Parameters:
+- `url`: `string` - Base URL or .exr/.json URL.
+- `onLoad?`: `function` - Callback fired after the EXR and metadata are loaded.
+- `onProgress?`: `function` - Progress callback invoked with loader events.
+- `onError?`: `function` - Error callback invoked when load fails.
+
+###### loadAsync(url, onProgress?)
+Promise-based variant of load.
+Parameters:
+- `url`: `string`
+- `onProgress?`: `function` - Optional progress callback invoked with loader events.
+Returns: `Promise.<AnimationBakeMixer>` - Promise that resolves with the initialized mixer.
+
+##### Example
+
+```js
+import { AnimationBakeLoader } from '@three-blocks/core';
+
+const loader = new AnimationBakeLoader();
+loader.load('/files/baked_vat', (mixers, meta) => {
+  const clips = Array.isArray(mixers) ? mixers : [ mixers ];
+  const metaList = Array.isArray(meta) ? meta : [ meta ];
+  clips.forEach((mixer, index) => {
+    const info = metaList[ index ] ?? {};
+    const instanceCount = info.instances?.length ?? info.idCount ?? 0;
+    console.log('Instances in clip', index, instanceCount);
+    mixer.play();
+  });
+});
+
+// or use the async variant
+const clipMixers = await loader.loadAsync('/files/baked_vat');
+const mixers = Array.isArray(clipMixers) ? clipMixers : [ clipMixers ];
+mixers.forEach((mixer) => mixer.setConfig({ loop: false }).play());
+```
+
+See also: AnimationBakeMixer
+
+---
+
+#### AnimationBakeMixer
+**Kind:** Class
+
+```js
+import { AnimationBakeMixer } from '@three-blocks/core';
+```
+
+Playback controller for baked animation textures (VAT/OAT).
+
+- Manages frame uniforms: `frameIndexUniform`, `framesCountUniform`, `frameTimeUniform`
+- Supports modes: 'vertex' (VAT) and 'object' (OAT)
+- Provides playback controls and frame interpolation
+
+##### Properties
+- `duration`: `number` - Total animation length in seconds. Filled from metadata when available, otherwise derived from frame count and frames per second.
+- `time`: `number` - Current playback time in seconds within the animation clip.
+- `metadata`: `AnimationBakeMetadata | undefined` - Last metadata object passed to {@link AnimationBakeMixer#init}.
+
+##### Methods
+
+###### init(meta?)
+Initialize from metadata JSON (single entry point for configuration). Expected VAT metadata keys: `mode='vertex'`, `framesOut`, `vertexCount`, `width`, `height`, etc. Expected OAT metadata keys: `mode='object'`, `framesOut`, `idCount`, `width`, `height`, etc.
+Parameters:
+- `meta?`: `AnimationBakeMetadata` - Metadata exported by the baking pipeline.
+Returns: `this`
+
+###### setConfig(config?)
+Update runtime playback configuration values.
+Parameters:
+- `config?`: `AnimationBakeConfig` - Partial configuration overrides.
+
+###### getDuration()
+Returns the effective duration of the baked animation in seconds. Falls back to frames / fps when metadata does not provide a duration.
+Returns: `number`
+
+###### getTime()
+Returns the current playback time in seconds.
+Returns: `number`
+
+###### setTime(seconds, options?, options.wrap?)
+Set playback time in seconds. When `wrap` is true and looping is enabled the provided value wraps into the current loop duration, otherwise it is clamped.
+Parameters:
+- `seconds`: `number` - Target playback time.
+- `options?`: `Object`
+- `options.wrap?`: `boolean` = true
+Returns: `this`
+
+###### setInterpolationOverride(mode)
+Set interpolation override.
+Parameters:
+- `mode`: `'auto' | 'force0' | 'force1'`
+
+###### registerMaterial(material, mode?)
+Register a NodeMaterial to use the baked animation. Pass `opts.mode` to override the mixer's mode per-material.
+
+Note: You can also wire manually using
+Parameters:
+- `material`: `THREE.NodeMaterial` - NodeMaterial instance to bind uniforms to.
+- `mode?`: `'vertex' | 'object' | Object` - Force a specific sampling mode for this material. When an object is passed, it can contain `{ mode, geometry, positionAttribute, normalAttribute, vertexCount, instanceCount, frameIndexNode, framesCountNode, textureOffsetNode, idNode, positionInputNode, normalInputNode }`
+Returns: `THREE.NodeMaterial`
+
+###### play()
+Begin playback of the baked animation using the current configuration.
+
+###### pause()
+Pause playback while preserving the current frame and interpolation value.
+
+###### stop()
+Stop playback and seek back to the first frame.
+
+###### seekFrame(frameIndex)
+Jump to a specific baked frame index.
+Parameters:
+- `frameIndex`: `number` - Zero-based frame index to seek to.
+
+###### seekSeconds(seconds)
+Seek to a specific playback time in seconds.
+Parameters:
+- `seconds`: `number` - Target playback time in seconds.
+
+###### update(deltaSeconds)
+Advance playback by the provided delta time.
+Parameters:
+- `deltaSeconds`: `number` - Elapsed time in seconds since the previous update.
+
+###### attachGUI(gui, opts?, opts.folderName?)
+Attach a standard playback GUI to this mixer. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `gui`: `object` - Instance from `lil-gui` or `renderer.inspector.createParameters()`.
+- `opts?`: `Object` - Additional GUI options.
+- `opts.folderName?`: `string` - Custom name for the created folder.
+Returns: `this`
+
+###### inferFrames(texture, options?, options.vertexCount?, options.objectCount?, options.mode?)
+Infer frame count from a baked animation texture.
+Parameters:
+- `texture`: `THREE.DataTexture` - EXR texture to inspect.
+- `options?`: `Object` - Additional hints for the inference.
+- `options.vertexCount?`: `number` - Vertex count for VAT data.
+- `options.objectCount?`: `number` - Instance/object count for OAT data.
+- `options.mode?`: `'vertex' | 'object'` = 'vertex' - Specifies how to interpret the texture layout.
+Returns: `number` - Inferred number of frames.
+
+##### Example
+
+```js
+import { AnimationBakeMixer } from '@three-blocks/core';
+
+const mixer = new AnimationBakeMixer(texture, { fps: 60, loop: true });
+mixer.registerMaterial(material);
+
+function render(deltaSeconds) {
+  mixer.update(deltaSeconds);
+  renderer.render(scene, camera);
+}
+```
+
+See also: AnimationBakeLoader
+
+---
+
+### Text
+
+High-performance text rendering with MSDF fonts.
+
+#### batchedText [TSL]
+**Kind:** Function
+
+```js
+import { batchedText } from '@three-blocks/core';
+```
+
+Creates a TSL Fn that computes BatchedText vertex transforms.
+
+This function:
+
+- Reads per-member parameters from storage buffers
+- Uses shared textGlyphTransform for glyph geometry (code reuse with TextNode)
+- Applies per-member matrix transformation
+- Handles billboarding and curvature
+
+This node should be used in `material.setupVertex` to handle batched text geometry transformation.
+
+##### Parameters
+- `batchedText`: `BatchedText` - The BatchedText instance
+- `uBillboard`: `UniformNode` - Billboard uniform node
+
+Returns: `Fn.<vec3>` - A callable TSL function that returns the transformed position
+
+---
+
+#### BatchedText
+**Kind:** Class
+
+```js
+import { BatchedText } from '@three-blocks/core';
+```
+
+###### WebGL Support has been temporarily disabled.
+
+High-performance batched rendering for multiple `Text` instances with GPU-accelerated culling, sorting, and instancing. Renders thousands of text labels in a single draw call with automatic transparency sorting for correct z-ordering.
+
+##### Why BatchedText is Fast
+
+**Single Draw Call Architecture**
+
+- Renders all text instances in ONE draw call vs N draw calls
+- Eliminates CPU overhead from state changes and draw call submission
+- Uses GPU instancing with `StorageBufferAttribute` for transforms and styles
+- Shared SDF atlas texture across all text members
+
+**GPU Compute Pipeline (WebGPU)**
+
+- Frustum culling runs entirely on GPU via compute shaders
+- LOD-based glyph sampling reduces overdraw for distant text
+- Automatic back-to-front sorting for transparent SDF text in the GPU via bitonic sorting in compute shaders
+- Indirect draw commands updated on GPU without CPU readback
+- Dynamic workgroup dispatch via `computeIndirect` for efficient scaling
+
+**Transparency Z-Ordering**
+
+- Sorted glyph packing ensures correct depth ordering for SDF anti-aliasing
+- Per-member prefix sum computes glyph offsets in sorted order
+- Glyphs scattered to packed buffer preserving back-to-front order
+- Eliminates z-fighting between overlapping transparent text
+
+**Dynamic Updates with Pre-allocation**
+
+- Set `maxTextCount` and `maxGlyphCount` to pre-allocate buffers for dynamic `addText()`
+- Without pre-allocation, buffers are sized to initial content (no dynamic growth)
+- `computeIndirect` dynamically adjusts GPU workgroup counts
+- Uniform-based count tracking avoids shader recompilation within capacity
+
+##### Features
+
+- **Batched Rendering**: Single draw call for unlimited text instances
+- **GPU Frustum Culling**: Skip rendering off-screen text (WebGPU only)
+- **LOD Sampling**: Reduce glyph count for distant text
+- **Billboarding**: Camera-facing text in world space
+- **Per-Instance Styling**: Color, outline, opacity per text member
+- **Dynamic Updates**: Add/remove/modify text at runtime via `sync()`
+- **Static Mode**: `batch.staticMode = true`. Lock layout after initial pack for maximum performance
+- **Transparency Sorting**: Correct z-order for SDF anti-aliased edges
+- **TSL Hooks**: Custom `positionNode`, `opacityNode`, `colorNode` still work
+
+##### Usage
+
+##### Performance Tips
+
+- Use `static: true` if text content never changes after initial setup
+- Enable `perObjectFrustumCulled` for large scenes with many off-screen labels
+- Use `_cullOptions.lodMode` to enable/disable LOD sampling
+- Range LOD uses `_cullOptions.lodNear` + `_cullOptions.lodFar`
+- Exp LOD uses `_cullOptions.lodNear` + `_cullOptions.lodDensity` (exp density). `lodNear` shifts the start of the exp curve.
+- Call `sync()` only when text content changes, not every frame
+
+##### LOD API
+
+```js
+// Range mode (distance-based fade)
+batch._cullOptions.lodMode = LOD_MODE_RANGE;
+batch._cullOptions.lodNear = 50;    // start distance
+batch._cullOptions.lodFar = 400;    // end distance
+
+// Exp mode (density-based fade)
+batch._cullOptions.lodMode = LOD_MODE_EXP;
+batch._cullOptions.lodNear = 50;        // start distance
+batch._cullOptions.lodDensity = 0.00025; // exp density
+
+// Disable LOD
+batch._cullOptions.lodMode = LOD_MODE_DISABLED;
+
+// Optional: create the culler immediately (before first render)
+batch.initCuller( renderer );
+batch.culler.lodMode.value = LOD_MODE_EXP;
+```
+
+##### WebGL Limitations
+
+- GPU frustum culling requires WebGPU (compute shaders not available in WebGL)
+- `perObjectFrustumCulled` automatically disabled on WebGL backend
+- All other features (batching, billboarding, styling) work in WebGL
+
+Extends: Text
+
+##### Properties
+- `count`: `any` - Get the number of batched text members.
+- `count`: `any` - Ignored. `count` is read-only.
+- `isWebGL`: `boolean | null` - Returns true if running on WebGL backend (no compute shader support). Returns null if backend hasn't been detected yet.
+- `isCullingActive`: `boolean` - Returns true if GPU culling is active (WebGPU only, and culling requested).
+- `perTextBoundingBox`: `boolean` - Get or set per-text bounding box mode. When true, each text instance gets its own bounding sphere for more accurate culling. When false (default), uses the maximum bounding sphere of all instances for faster culling.
+
+##### Methods
+
+###### add(objs)
+Add objects to batch. `Text` instances become batched members. Non-Text objects are added to scene graph normally.
+Parameters:
+- `objs`: `THREE.Object3D` - Objects to add.
+Returns: `this`
+
+###### remove(objs)
+Remove objects from batch.
+Parameters:
+- `objs`: `THREE.Object3D` - Objects to remove.
+Returns: `this`
+
+###### addText(text)
+Register a Text instance as a batched member. Returns an instance ID that can be used with setMatrixAt, setColorAt, etc.
+
+If `maxTextCount` was specified in constructor options, this will return -1 and log a warning when the limit is exceeded.
+Parameters:
+- `text`: `Text` - Text instance to batch.
+Returns: `number` - The instance ID for this text, or -1 if capacity exceeded or already added with same index.
+
+###### removeText(text)
+Unregister a Text instance from batch.
+Parameters:
+- `text`: `Text` - Text instance to remove.
+
+###### getTextAt(instanceId)
+Get the Text instance at the given instance ID.
+Parameters:
+- `instanceId`: `number` - The instance ID.
+Returns: `Text | null` - The Text instance, or null if not found.
+
+###### setMatrixAt(instanceId, matrix)
+Sets the given local transformation matrix to the defined text instance. This updates the text's matrix and marks it for update.
+Parameters:
+- `instanceId`: `number` - The instance ID of the text to set the matrix of.
+- `matrix`: `THREE.Matrix4` - A 4x4 matrix representing the local transformation.
+Returns: `BatchedText` - A reference to this batched text.
+
+###### getMatrixAt(instanceId, matrix)
+Returns the local transformation matrix of the defined text instance.
+Parameters:
+- `instanceId`: `number` - The instance ID of the text to get the matrix of.
+- `matrix`: `THREE.Matrix4` - The target object that is used to store the result.
+Returns: `THREE.Matrix4` - The text instance's local transformation matrix.
+
+###### setColorAt(instanceId, color)
+Sets the given color to the defined text instance.
+Parameters:
+- `instanceId`: `number` - The instance ID of the text to set the color of.
+- `color`: `THREE.Color | number | string` - The color to set the instance to.
+Returns: `BatchedText` - A reference to this batched text.
+
+###### getColorAt(instanceId, color)
+Returns the color of the defined text instance.
+Parameters:
+- `instanceId`: `number` - The instance ID of the text to get the color of.
+- `color`: `THREE.Color` - The target object that is used to store the result.
+Returns: `THREE.Color` - The text instance's color.
+
+###### getGlyphAt(instanceId, target?)
+Returns glyph data for the given text instance without triggering a full sync. Only the first glyph range for the member is returned; multi-glyph members are supported via glyphOffset/count.
+Parameters:
+- `instanceId`: `number`
+- `target?`: `object` - Optional target object to populate.
+Returns: `Object | null`
+
+###### setGlyphAt(instanceId, glyph)
+Quickly update glyph data (atlas index, bounds, letter index) for a specific text instance without triggering a full text sync/layout. Useful for single-glyph members such as counters.
+Parameters:
+- `instanceId`: `number`
+- `glyph`: `Object`
+Returns: `this`
+
+###### updateMatrixWorld(force?)
+Update world matrices and recompute bounds.
+Parameters:
+- `force?`: `boolean` - Force update even if matrices haven't changed.
+
+###### updateBounds()
+Recompute bounding volumes from all member bounds.
+
+###### onBeforeRender()
+Internal render hook. Ensures children are synced, updates/creates the GPU culler, refreshes visibility buffers and material flags, and lazily prepares storage buffers.
+
+###### initCuller(renderer)
+Initialize the GPU culler early (before first render). Useful when you need to access `culler` immediately.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - Renderer instance.
+Returns: `ComputeInstanceCulling | null` - The culler, or null if WebGL or sync not completed yet.
+
+###### onAfterRender()
+Internal render hook. Restore material-side settings after render.
+
+###### sync(callback?, renderer)
+Synchronize all member `Text` instances. Triggers repacking of instance attributes when any member has changed, and rebuilds glyph data arrays.
+
+**Important:** This only syncs text *content* changes. Position/transform changes require calling `setMatrixAt(instanceId, matrix)` after updating `text.position`.
+Parameters:
+- `callback?`: `function` - Called when sync completes
+- `renderer`: `THREE.WebGPURenderer` - **Required on first call** to detect WebGPU/WebGL backend for proper SDF texture handling via `getTextRenderInfo()`. Subsequent calls can omit this if the backend was already detected.
+
+###### getTextBoundingSphereAt(instanceId)
+Get the bounding sphere for a specific text instance (local space).
+Parameters:
+- `instanceId`: `number` - The instance ID of the text.
+Returns: `Object | null`
+
+###### updateMemberMatrixWorld(text)
+Update a single member's instance matrix in the storage buffer using its current world matrix. Does not recompute style parameters.
+Parameters:
+- `text`: `Text`
+
+###### updateCullingAndPacking(renderer, camera)
+Update culling (camera uniforms and per-member ref positions) and run glyph packing compute passes. This is called automatically in `onBeforeRender`, so manual calls are typically not needed.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer`
+- `camera`: `THREE.Camera`
+
+###### attachGUI(folder)
+Attach a simple GUI folder with controls for culling and LOD settings. Compatible with lil-gui, dat.gui, and Three.js Inspector. Note: Culling options are only shown on WebGPU backend.
+Parameters:
+- `folder`: `object` - GUI instance (e.g., lil-gui/dat.gui or renderer.inspector.createParameters()).
+
+###### disposeGUI()
+Destroy the attached GUI and clear reference.
+
+###### dispose()
+Dispose resources associated with this helper and detach debug UI.
+
+##### Example
+
+```js
+import { BatchedText, Text } from '@three-blocks/core';
+
+// maxTextCount= 5000 -Pre-allocate for up to 5000 text instances
+// maxGlyphCount= 100000 - Pre-allocate for ~100k total glyphs (~20 per text)
+// Create batched text container with pre-allocation for dynamic updates
+const batch = new BatchedText(5000, 100000, material);
+batch.billboarding = true
+batch.staticMode = true
+
+// Add initial text instances
+for (let i = 0; i < 1000; i++) {
+  const text = new Text();
+  text.text = `Label ${i}`;
+  text.fontSize = 1;
+  text.color.setHSL(Math.random(), 0.7, 0.6);
+  text.position.set( Math.random()*20-10, Math.random()*20-10, Math.random()*20-10 );
+  text.updateMatrixWorld();
+  const id = batch.addText(text);
+
+  // Set transform (like BatchedMesh API) are also available
+  // matrix.compose(position, quaternion, scale);
+  // batch.setMatrixAt(id, matrix);
+  // batch.setColorAt(id, color);
+}
+
+scene.add(batch);
+
+// Dynamically add more text later (within maxTextCount/maxGlyphCount limits)
+const newText = new Text();
+newText.text = 'Dynamic!';
+const newId = batch.addText(newText);  // Returns -1 if capacity exceeded
+if (newId >= 0) {
+  batch.setMatrixAt(newId, matrix);
+}
+
+// Update existing text content
+const text = batch.getTextAt(0);
+text.text = 'Updated!';
+```
+
+Demo: https://three-blocks.com/docs/demos/text_batched/
+
+---
+
+#### batchedTextColor [TSL]
+**Kind:** Function
+
+```js
+import { batchedTextColor } from '@three-blocks/core';
+```
+
+TSL function for creating a BatchedTextColorNode.
+
+This node handles SDF-based rendering for BatchedText, computing fill and outline colors and opacity based on signed distance fields. It reads per-member colors from storage buffers and applies visibility masking for GPU culling.
+
+This node should be used in `material.setupDiffuseColor` to override the diffuse color with SDF rendering.
+
+##### Parameters
+- `batchedText`: `BatchedText` - Reference to the BatchedText instance.
+- `baseDiffuse?`: `Node.<vec4>` - Base diffuse color/alpha computed before SDF.
+
+Returns: `BatchedTextColorNode`
+
+---
+
+#### text [TSL]
+**Kind:** Function
+
+```js
+import { text } from '@three-blocks/core';
+```
+
+TSL function for creating a TextNode.
+
+TextNode implements vertex shader logic for Text rendering. It transforms positionLocal based on glyph bounds and SDF atlas data. This node should be used in `material.setupVertex` to handle text geometry transformation.
+
+Uses textGlyphTransform with uniform-based parameters for single Text instances.
+
+##### Parameters
+- `text`: `Text` - Reference to the Text instance.
+
+Returns: `Fn.<vec3>` - A callable TSL function that returns the transformed position
+
+---
+
+#### Text
+**Kind:** Class
+
+```js
+import { Text } from '@three-blocks/core';
+```
+
+High-quality SDF-based text rendering with GPU-accelerated glyph generation.
+
+**Architecture**
+
+- Multi-channel SDF (Signed Distance Field) atlas for sharp text at any scale
+- Dynamic glyph packing and layout via `troika-three-text`
+- TSL node-based material for advanced effects (outlines, fills)
+- Async `sync()` generates glyphs on-demand with automatic atlas management
+
+**Features**
+
+- Crisp text rendering at any distance/angle
+- Fill and outline with independent colors/opacity
+- Text alignment, wrapping, and layout control
+- Custom positioning/coloring via TSL node hooks
+- Efficient instancing for many text instances via `BatchedText`
+
+**Events**
+
+- `syncstart`: Fired when layout/atlas generation begins
+- `synccomplete`: Fired when geometry and material are ready
+
+Extends: THREE.Mesh
+
+##### Properties
+- `textRenderInfo`: `Object | null` - Get the computed text layout and SDF atlas information.
+- `billboarding`: `boolean` - Enable yaw-only billboarding so text always faces the camera. When enabled, text rotates around the Y-axis to face the camera while remaining upright.
+- `screenSpace`: `boolean` - Enable screen-space rendering mode where text is positioned in NDC coordinates. When enabled, text position is mapped from layout coordinates to screen pixels using the viewport dimensions, useful for DOM-synchronized text overlays.
+- `glyphGeometryDetail`: `number` - Geometry tessellation detail level (1-3).
+
+##### Methods
+
+###### sync(callback?, renderer?)
+Trigger asynchronous glyph layout and SDF atlas generation. Called automatically before render if text properties changed.
+Parameters:
+- `callback?`: `function` - Called when sync completes.
+- `renderer?`: `THREE.WebGPURenderer` - Renderer for GPU SDF generation.
+
+###### onBeforeRender(renderer, scene, camera, geometry, material)
+Pre-render hook: ensures text is synced and material configured.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer`
+- `scene`: `THREE.Scene`
+- `camera`: `THREE.Camera`
+- `geometry`: `THREE.BufferGeometry`
+- `material`: `THREE.Material`
+
+###### onAfterRender(renderer, scene, camera, geometry, material)
+Post-render hook: restores material side setting.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer`
+- `scene`: `THREE.Scene`
+- `camera`: `THREE.Camera`
+- `geometry`: `THREE.BufferGeometry`
+- `material`: `THREE.Material`
+
+###### dispose()
+Dispose of geometry resources.
+
+##### Example
+
+```js
+import { Text, textLetterId } from '@three-blocks/core';
+import { sin, positionLocal, Fn } from 'three/tsl';
+
+const text = new Text();
+text.text = 'Hello Three Blocks!';
+text.fontSize = 0.5;
+text.color = 0x00ff00;
+text.anchorX = 'center';
+text.anchorY = 'middle';
+
+// Optional outline
+text.outlineWidth = '5%';
+text.outlineColor = 0x000000;
+
+scene.add(text);
+
+// Custom TSL position hook using standard NodeMaterial API
+text.material.positionNode = Fn(() => {
+  const pos = positionLocal.toVar();
+  pos.y.addAssign(sin(textLetterId.mul(10)).mul(0.1));
+  return pos;
+})();
+```
+
+Demo: https://three-blocks.com/docs/demos/text/
+
+---
+
+#### textColor [TSL]
+**Kind:** Function
+
+```js
+import { textColor } from '@three-blocks/core';
+```
+
+TSL function for creating a TextColorNode.
+
+This node handles SDF-based rendering of text, computing fill and outline colors and opacity based on signed distance fields. It should be used in `material.setupDiffuseColor` to override the diffuse color with SDF rendering.
+
+##### Parameters
+- `text`: `Text` - Reference to the Text instance.
+- `baseDiffuse?`: `Node.<vec4>` - Base diffuse color/alpha computed before SDF.
+
+Returns: `TextColorNode`
+
+---
+
+#### textDrawId [TSL]
+**Kind:** Constant
+
+```js
+import { textDrawId } from '@three-blocks/core';
+```
+
+Draw/member ID as a float. For single Text instances, this is always 0. For BatchedText, this is the index of the text member within the batch.
+
+Works in both vertex shaders (positionNode) and fragment shaders (colorNode).
+
+Demo: https://three-blocks.com/docs/demos/text-draw-id/
+
+---
+
+#### textGlyphDimensions [TSL]
+**Kind:** Constant
+
+```js
+import { textGlyphDimensions } from '@three-blocks/core';
+```
+
+Glyph dimensions as a vec2 (width, height) in local units.
+
+Demo: https://three-blocks.com/docs/demos/text-glyph-dimensions/
+
+---
+
+#### textGlyphUV [TSL]
+**Kind:** Constant
+
+```js
+import { textGlyphUV } from '@three-blocks/core';
+```
+
+Glyph UV coordinates as a vec2. These are the UV coordinates within the current glyph's bounding box (0-1 range within the glyph).
+
+Demo: https://three-blocks.com/docs/demos/text-glyph-uv/
+
+---
+
+#### textLetterId [TSL]
+**Kind:** Constant
+
+```js
+import { textLetterId } from '@three-blocks/core';
+```
+
+Letter ID as a normalized float (0-1) representing the position of the current glyph within the text. First letter is 0, last letter is 1.
+
+Works in both vertex shaders (positionNode) and fragment shaders (colorNode). For BatchedText, this is the letter position within each individual text member.
+
+Demo: https://three-blocks.com/docs/demos/text-letter-id/
+
+---
+
+#### textUV [TSL]
+**Kind:** Constant
+
+```js
+import { textUV } from '@three-blocks/core';
+```
+
+UV coordinates across the entire text block (0-1 range). This is useful for effects that span the whole text.
+
+Demo: https://three-blocks.com/docs/demos/text-uv/
+
+---
+
+### IndirectBatchedMesh
+
+Indirect instanced rendering with GPU-driven culling.
+
+#### indirectBatch [TSL]
+**Kind:** Function
+
+```js
+import { indirectBatch } from '@three-blocks/core';
+```
+
+TSL helper for applying indirect batched transforms to vertices. Automatically resolves instance IDs, applies transforms, and handles geometry masking.
+
+**Example: Basic setup**
+
+##### Parameters
+- `batchMesh`: `IndirectBatchedMesh` - The batched mesh instance to read data from.
+
+Returns: `IndirectBatchNode` - Node that transforms vertices using batched instance data.
+
+##### Example
+
+```js
+import * as THREE from 'three/webgpu';
+import { IndirectBatchedMesh, indirectBatch } from '@three-blocks/core';
+import { positionLocal, morphReference, skinning, uniform, subBuild, normalLocal, Fn } from 'three/tsl';
+
+const geometry = new THREE.BoxGeometry(1, 1, 1);
+const vertexCount = geometry.getAttribute('position').count;
+const indexCount = geometry.getIndex()?.count || 0;
+const instanceCount = 512;
+
+const material = new THREE.MeshBasicNodeMaterial();
+const mesh = new IndirectBatchedMesh(instanceCount, vertexCount, indexCount, material);
+
+// Disable internal culling for this simple demo
+mesh.perObjectFrustumCulled = false;
+
+const geoId = mesh.addGeometry(geometry);
+
+// Setup the indirect batch transform
+material.setupPosition = function(builder) {
+  const { object, geometry } = builder;
+
+  if (geometry.morphAttributes.position || geometry.morphAttributes.normal || geometry.morphAttributes.color) {
+    morphReference(object).toStack();
+  }
+
+  if (object.isSkinnedMesh === true) {
+    skinning(object).toStack();
+  }
+
+  if (object.isIndirectBatchedMesh) {
+    // inject here
+    indirectBatch(object).toStack();
+
+    const worldMatrix = uniform(new THREE.Matrix4()).onObjectUpdate((_, self) => self.value.copy(object.matrixWorld)).setName('batchWorldMatrix');
+    object.setCullingMatrixNode(({ baseMatrix }) => worldMatrix.mul(baseMatrix));
+  }
+
+  if (this.positionNode !== null) {
+    positionLocal.assign(subBuild(this.positionNode, 'POSITION', 'vec3'));
+  }
+
+  return positionLocal;
+};
+
+// Use normal-based coloring to verify transforms work correctly
+material.colorNode = Fn(() => {
+  return normalLocal.mul(0.5).add(0.5);
+})();
+
+// Add instances in a grid pattern
+const tmpMatrix = new THREE.Matrix4();
+const gridSize = Math.ceil(Math.cbrt(instanceCount));
+const spacing = 2.5;
+
+let idx = 0;
+for (let x = 0; x < gridSize && idx < instanceCount; x++) {
+  for (let y = 0; y < gridSize && idx < instanceCount; y++) {
+    for (let z = 0; z < gridSize && idx < instanceCount; z++) {
+      const id = mesh.addInstance(geoId);
+      tmpMatrix.makeTranslation(
+        (x - gridSize / 2) * spacing,
+        (y - gridSize / 2) * spacing,
+        (z - gridSize / 2) * spacing
+      );
+      mesh.setMatrixAt(id, tmpMatrix);
+      idx++;
+    }
+  }
+}
+
+mesh.needsUpdate = true;
+```
+
+Demo: https://three-blocks.com/docs/demos/indirect-batch/
+
+---
+
+#### indirectBatchColor [TSL]
+**Kind:** Function
+
+```js
+import { indirectBatchColor } from '@three-blocks/core';
+```
+
+Access the per-instance color written by {@link IndirectBatchNode}.
+
+This node reads the varying `vBatchColor` populated automatically when:
+
+- `IndirectBatchedMesh.setColorAt()` is called, and
+- the material uses `indirectBatch(mesh)` (so the varying is assigned).
+
+Works in both vertex and fragment stages.
+
+Returns: `Node.<vec3>` - Per-instance color varying.
+
+Demo: https://three-blocks.com/docs/demos/indirect-batch-color/
+
+---
+
+#### IndirectBatchedMesh
+**Kind:** Class
+
+```js
+import { IndirectBatchedMesh } from '@three-blocks/core';
+```
+
+WebGPU-first batched mesh using indirect instanced rendering with GPU-driven culling.
+
+**Architecture Overview**
+
+- Packs multiple geometries into a single `BufferGeometry` with indirect draw commands
+- Always uses multi-draw indirect with `firstInstance` offsets (even without GPU culling)
+- Stores per-instance data in GPU `StorageBufferAttributes` (transforms, colors, geometry IDs)
+- Delegates culling/sorting to compute pipelines (e.g., `ComputeBatchCulling`)
+- Supports optional internal culling or external compute pipeline attachment
+
+**Limitations**
+
+- **Transparency is not supported**: This mesh class is designed for opaque materials only. Transparent materials will not render correctly due to the lack of depth sorting. Use standard `Mesh` or `InstancedMesh` with ComputeInstanceCulling for transparent objects.
+
+**Culling Flow**
+
+- `ComputeBatchCulling` evaluates visibility/LOD and compacts survivor IDs
+- Mesh reads from buffers via `setIndirect()` and `setSurvivorIdBuffer()`
+- Renderer draws using buffers while compute updates for next frame
+
+**Buffer Roles**
+
+- `matricesSB`: Authoritative per-instance transforms
+- `survivorIdSB`: Maps `instanceIndex` → original instance ID after culling
+- `geometryIdSB`: Identifies which geometry segment each instance uses
+- `indirect`: Controls final `instanceCount` for GPU draw
+
+**Example: Basic setup with multiple geometries**
+
+Extends: THREE.Mesh
+
+##### Properties
+- `frustumCulled`: `boolean` (default: false) - Disable frustum culling for the indirect batched mesh.
+- `perObjectFrustumCulled`: `boolean` (default: true) - Enable per-instance frustum culling when using internal culling.
+- `maxInstanceCount`: `number` - Maximum instance capacity.
+- `instanceCount`: `number` - Current number of active instances.
+- `unusedVertexCount`: `number` - Remaining vertex capacity.
+- `unusedIndexCount`: `number` - Remaining index capacity.
+
+##### Methods
+
+###### beginBulkUpdate()
+Defer CPU indirect rebuilds while performing many mutations (add/remove instances). Call `endBulkUpdate()` to rebuild once after the batch.
+Returns: `this`
+
+###### endBulkUpdate(rebuild?)
+Resume CPU indirect rebuilds after `beginBulkUpdate()`.
+Parameters:
+- `rebuild?`: `boolean` = true - Rebuild immediately when pending.
+Returns: `this`
+
+###### enableWorkgroupIndirect(workgroupSize?)
+Optional helper: allocate and update an indirect workgroup buffer for compute passes. Writes ceil(instanceCount / workgroupSize) into element 0 each frame.
+Parameters:
+- `workgroupSize?`: `number` = 64 - Workgroup size used by your compute shader.
+Returns: `THREE.IndirectStorageBufferAttribute` - Indirect buffer with [x=workgroups, y=1, z=1].
+
+###### enableInternalCulling(renderer)
+Enable built-in compute-based culling using `ComputeBatchCulling`. Automatically creates and attaches a culling pipeline.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer instance.
+Returns: `this`
+
+###### setCullingMatrixNode(resolverFn)
+Provide a custom mat4 node for culling/sorting (e.g., animation texture).
+Parameters:
+- `resolverFn`: `function | null` - Function receiving { i, baseMatrix, gid } and returning a mat4 node.
+Returns: `this`
+
+###### attachGUI(folder)
+Attach culling controls to a GUI folder. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `folder`: `Object` - GUI folder instance (e.g., from lil-gui or renderer.inspector.createParameters()).
+
+###### disposeGUI()
+Detach and destroy the GUI folder.
+
+###### computeBoundingBox()
+Compute the world-space bounding box for all active instances. Updates `this.boundingBox`.
+Returns: `void`
+
+###### computeBoundingSphere()
+Compute the world-space bounding sphere for all active instances. Updates `this.boundingSphere`.
+Returns: `void`
+
+###### updateInternalCulling(camera?)
+Update the internal culling system for the current frame. Swaps buffers and runs the compute culling pass.
+Parameters:
+- `camera?`: `THREE.Camera` - Camera to use for frustum culling.
+Returns: `this`
+
+###### setSurvivorIdBuffer(sbAttr, isInternal?)
+Attach a survivor ID mapping buffer produced by external compute culling.
+Parameters:
+- `sbAttr`: `THREE.StorageBufferAttribute` - StorageBufferAttribute (Uint32, itemSize=1).
+- `isInternal?`: `boolean` = false - If true, marks this as an internal buffer (won't disable internal culling).
+Returns: `this`
+
+###### setDrawFirstInstanceBuffer(sbAttr)
+Attach a per-draw firstInstance buffer (geometry offsets) produced by compute culling.
+Parameters:
+- `sbAttr`: `THREE.StorageBufferAttribute | null` - StorageBufferAttribute (Uint32, itemSize=1).
+Returns: `this`
+
+###### setIndirect(indirectAttribute)
+Set the indirect draw command buffer for this mesh.
+Parameters:
+- `indirectAttribute`: `THREE.IndirectStorageBufferAttribute` - Indirect draw args.
+Returns: `this`
+
+###### setInstanceCount(maxInstanceCount)
+Resize the instance pool capacity. Preserves existing data and initializes new slots to identity transforms.
+Parameters:
+- `maxInstanceCount`: `number` - New maximum instance count.
+
+###### addInstance(geometryId)
+Add a new instance referencing a previously added geometry.
+Parameters:
+- `geometryId`: `number` - Geometry ID returned by `addGeometry()`.
+Returns: `number` - The new instance ID.
+
+###### addGeometry(geometry, reservedVertexCount?, reservedIndexCount?)
+Add a geometry to the batch, allocating space in the merged buffers.
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Source geometry to add.
+- `reservedVertexCount?`: `number` = -1 - Vertex capacity to reserve (-1 = exact fit).
+- `reservedIndexCount?`: `number` = -1 - Index capacity to reserve (-1 = exact fit).
+Returns: `number` - Geometry ID for creating instances.
+
+###### setGeometryAt(geometryId, geometry)
+Replace or update geometry data at a specific geometry slot.
+Parameters:
+- `geometryId`: `number` - Target geometry ID.
+- `geometry`: `THREE.BufferGeometry` - New geometry data.
+Returns: `number` - The geometry ID.
+
+###### deleteGeometry(geometryId)
+Mark a geometry as inactive and delete all associated instances.
+Parameters:
+- `geometryId`: `number` - Geometry ID to delete.
+Returns: `this`
+
+###### deleteInstance(instanceId)
+Mark an instance as inactive and return its slot to the pool.
+Parameters:
+- `instanceId`: `number` - Instance ID to delete.
+Returns: `this`
+
+###### optimize()
+Defragment geometry data by compacting active geometry segments. Reduces gaps and improves memory layout.
+Returns: `this`
+
+###### getBoundingBoxAt(geometryId, target)
+Get the bounding box for a specific geometry.
+Parameters:
+- `geometryId`: `number` - Target geometry ID.
+- `target`: `THREE.Box3` - Box3 to store the result.
+Returns: `THREE.Box3 | null` - The bounding box or null if invalid.
+
+###### getBoundingSphereAt(geometryId, target)
+Get the bounding sphere for a specific geometry.
+Parameters:
+- `geometryId`: `number` - Target geometry ID.
+- `target`: `THREE.Sphere` - Sphere to store the result.
+Returns: `THREE.Sphere | null` - The bounding sphere or null if invalid.
+
+###### setMatrixAt(instanceId, matrix)
+Set the transform matrix for an instance.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+- `matrix`: `THREE.Matrix4` - Transform matrix to apply.
+Returns: `this`
+
+###### getMatrixAt(instanceId, matrix)
+Get the transform matrix for an instance.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+- `matrix`: `THREE.Matrix4` - Matrix to store the result.
+Returns: `THREE.Matrix4`
+
+###### setColorAt(instanceId, color)
+Set the color for an instance. Automatically enables instance colors if not already enabled.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+- `color`: `THREE.Color` - Color to apply.
+Returns: `this`
+
+###### getColorAt(instanceId, color)
+Get the color for an instance.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+- `color`: `THREE.Color` - Color to store the result.
+Returns: `THREE.Color`
+
+###### setGeometryIdAt(instanceId, geometryId)
+Change which geometry an instance references.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+- `geometryId`: `number` - New geometry ID.
+Returns: `this`
+
+###### getGeometryIdAt(instanceId)
+Get the geometry ID for an instance.
+Parameters:
+- `instanceId`: `number` - Target instance ID.
+Returns: `number` - Geometry ID.
+
+###### copy(source)
+Create a deep copy of this IndirectBatchedMesh.
+Parameters:
+- `source`: `IndirectBatchedMesh` - Source mesh to copy from.
+Returns: `this`
+
+###### dispose()
+Dispose of GPU resources. Call this when the mesh is no longer needed.
+Returns: `void`
+
+##### Example
+
+```js
+import { IndirectBatchedMesh, indirectBatch } from '@three-blocks/core';
+import * as THREE from 'three/webgpu';
+
+// Create batched mesh: 10000 instances, 50000 vertices, 100000 indices
+const material = new THREE.MeshStandardNodeMaterial({ color: 0x4488ff });
+const mesh = new IndirectBatchedMesh(10000, 50000, 100000, material);
+// Add multiple geometry types
+const boxId = mesh.addGeometry(new THREE.BoxGeometry(1, 1, 1));
+const sphereId = mesh.addGeometry(new THREE.SphereGeometry(0.5, 16, 16));
+const coneId = mesh.addGeometry(new THREE.ConeGeometry(0.5, 1, 8));
+
+// Scatter instances of different geometries
+const matrix = new THREE.Matrix4();
+const geometries = [boxId, sphereId, coneId];
+
+for (let i = 0; i < 5000; i++) {
+  const geomId = geometries[i % 3];
+  const instanceId = mesh.addInstance(geomId);
+
+  matrix.makeTranslation(
+    (Math.random() - 0.5) * 200,
+    (Math.random() - 0.5) * 50,
+    (Math.random() - 0.5) * 200
+  );
+  mesh.setMatrixAt(instanceId, matrix);
+}
+
+scene.add(mesh);
+```
+
+See also: ComputeBatchCulling
+
+Demo: https://three-blocks.com/docs/demos/indirect-batched-mesh/
+
+---
+
+#### indirectBatchGeometryId [TSL]
+**Kind:** Function
+
+```js
+import { indirectBatchGeometryId } from '@three-blocks/core';
+```
+
+Access the geometry ID for a given instance in an {@link IndirectBatchedMesh}.
+
+Use this to apply different material effects per geometry type (e.g., different colors for boxes vs spheres in the same batched mesh).
+
+**Example: Per-geometry-type coloring**
+
+##### Parameters
+- `batchMesh`: `IndirectBatchedMesh` - The batched mesh instance.
+- `idNode?`: `Node.<int>` - Instance id to sample. If not provided, resolves automatically using survivorIdSB.
+
+Returns: `Node.<int>` - Geometry ID for the instance.
+
+##### Example
+
+```js
+import { IndirectBatchedMesh, indirectBatch, indirectBatchGeometryId } from '@three-blocks/core';
+import { vec3 } from 'three/tsl';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+
+const material = new MeshStandardNodeMaterial();
+const mesh = new IndirectBatchedMesh(1000, 10000, 30000, material);
+
+const boxId = mesh.addGeometry(new BoxGeometry(1, 1, 1));
+const sphereId = mesh.addGeometry(new SphereGeometry(0.5));
+
+// Color based on geometry type
+const geomId = indirectBatchGeometryId(mesh);
+const colors = uniformArray([
+	new THREE.Vector3(1.0, 0.3, 0.2),  // Red for boxes
+	new THREE.Vector3(0.2, 0.8, 0.4),  // Green for spheres
+	new THREE.Vector3(0.3, 0.5, 1.0)   // Blue for cones
+], 'vec3');
+material.colorNode = vec4(colors.element(geomId), 1.0);
+```
+
+Demo: https://three-blocks.com/docs/demos/indirect-batch-geometry-id/
+
+---
+
+#### indirectBatchId [TSL]
+**Kind:** Function
+
+```js
+import { indirectBatchId } from '@three-blocks/core';
+```
+
+Return the stable instance id for an {@link IndirectBatchedMesh}, honoring survivorIdSB when present.
+
+Use this to access per-instance data in custom material nodes. When GPU culling is active, `instanceIndex` gives the draw index (0 to survivorCount), while `indirectBatchId` returns the original instance ID from before culling.
+
+**Example: Per-instance color variation**
+
+##### Parameters
+- `batchMesh`: `IndirectBatchedMesh` - The batched mesh instance.
+
+Returns: `Node.<int>` - Stable instance id after culling/sorting.
+
+##### Example
+
+```js
+import { IndirectBatchedMesh, indirectBatch, indirectBatchId } from '@three-blocks/core';
+import { hash, mix, vec3 } from 'three/tsl';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+
+const material = new MeshStandardNodeMaterial();
+const mesh = new IndirectBatchedMesh(1000, 10000, 30000, material);
+
+// Get the stable instance ID (works with culling)
+const instanceId = indirectBatchId(mesh);
+
+// Use hash for per-instance random color
+const randomHue = hash(instanceId);
+material.colorNode = mix(vec3(1, 0, 0), vec3(0, 0, 1), randomHue);
+```
+
+Demo: https://three-blocks.com/docs/demos/indirect-batch-id/
+
+---
+
+#### indirectBatchMatrix [TSL]
+**Kind:** Function
+
+```js
+import { indirectBatchMatrix } from '@three-blocks/core';
+```
+
+Fetch the batch matrix for a given instance id in an {@link IndirectBatchedMesh}.
+
+Use this to access instance transforms in custom vertex shaders or for computing world-space positions in fragment shaders.
+
+**Example: Custom vertex animation with instance matrix**
+
+##### Parameters
+- `batchMesh`: `IndirectBatchedMesh` - The batched mesh instance.
+- `idNode?`: `Node.<int>` = instanceIndex - Instance id to sample.
+
+Returns: `Node.<mat4>` - Batch transform matrix.
+
+##### Example
+
+```js
+import { IndirectBatchedMesh, indirectBatch, indirectBatchId, indirectBatchMatrix } from '@three-blocks/core';
+import { positionLocal, time, sin, vec3 } from 'three/tsl';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+
+const material = new MeshStandardNodeMaterial();
+const mesh = new IndirectBatchedMesh(1000, 10000, 30000, material);
+
+// Get instance ID and matrix
+const instanceId = indirectBatchId(mesh);
+const matrix = indirectBatchMatrix(mesh, instanceId);
+
+// Extract position from matrix (column 3)
+const instancePos = vec3(matrix[3].x, matrix[3].y, matrix[3].z);
+
+// Add wave animation based on instance world position
+const wave = sin(time.add(instancePos.x.mul(0.5))).mul(0.2);
+material.positionNode = positionLocal.add(vec3(0, wave, 0));
+```
+
+Demo: https://three-blocks.com/docs/demos/indirect-batch-matrix/
+
+---
+
+### Simulation
+
+Particle and fluid simulation systems (Boids, SPH, PBF).
+
+#### Boids
+**Kind:** Class
+
+```js
+import { Boids } from '@three-blocks/core';
+```
+
+GPU-accelerated boids flocking simulation with spatial grid optimization.
+
+**Features**
+
+- Classic boids rules: separation, alignment, cohesion with configurable weights
+- Spatial grid acceleration (default) or naive O(N²) neighbor search
+- 2D and 3D modes with boundary reflection
+- Pointer-based interaction for user-driven steering
+- Optional instanced mesh with automatic orientation from velocities
+- Phase tracking for wing flapping animation sync
+- Supports initialization from external samplers (e.g., ComputeBVHSampler)
+- GPU culling support with custom instanceMatrix (Three.js r182+)
+
+**Architecture**
+
+- Compute passes: GPU init → velocity (neighbor influence) → position (integration)
+- Spatial grid reduces neighbor search from O(N²) to O(N) via cell hashing
+- Three behavioral zones: separation (repel), alignment (match velocity), cohesion (attract)
+- Node-based instancing helper provides per-boid transform matrices for rendering
+
+```js
+import { Boids, ComputeBVHSampler, ComputeInstanceCulling, instanceCullingIndex } from '@three-blocks/core';
+import { ConeGeometry, InstancedMesh, MeshPhysicalNodeMaterial } from 'three/webgpu';
+
+// Advanced: Initialize from ComputeBVHSampler with GPU culling (Three.js r182+)
+const sampler = new ComputeBVHSampler(sdfGenerator, renderer, count);
+await sampler.compute();
+
+const boids = new Boids({
+  count,
+  is3D: true,
+  domainDimensions: new THREE.Vector3(100, 100, 100),
+  separation: 0.035,
+  alignment: 0.04,
+  cohesion: 0.03,
+  useRelativeParameters: true,
+  useMatrices: true, // Enable instance matrices for GPU culling
+  initialPositions: sampler.positionsBuffer // Initialize from sampler
+});
+
+// Create mesh with custom instanceMatrix for GPU culling
+const geometry = new ConeGeometry(0.15, 0.6, 4);
+const material = new MeshPhysicalNodeMaterial({ color: 0xffffff });
+const mesh = new InstancedMesh(geometry, material, count);
+mesh.instanceMatrix = boids.buffers.instanceMatrices.value;
+mesh.frustumCulled = true;
+scene.add(mesh);
+
+// Use culling index in material
+const instanceCulling = new ComputeInstanceCulling(mesh, renderer);
+const culledIndex = instanceCullingIndex(instanceCulling);
+material.colorNode = boids.buffers.velocities.element(culledIndex).xyz.length()...;
+```
+
+##### Properties
+- `sdfVolumeConstraint`: `SDFVolumeConstraint | null`
+- `bvhVolumeConstraint`: `BVHVolumeConstraint | null`
+
+##### Methods
+
+###### attachSpatialGrid(grid)
+Attach an external `SpatialGrid` instance for neighbor acceleration. Rebuilds compute passes to use grid-accelerated neighbor lookups.
+Parameters:
+- `grid`: `SpatialGrid` - External SpatialGrid instance.
+Returns: `this`
+
+###### enableSpatialGrid(options?)
+Create and attach an internal spatial grid for neighbor acceleration. Automatically configures grid based on current domain and zone radius.
+Parameters:
+- `options?`: `Object` = {} - Options forwarded to `SpatialGrid` constructor.
+Returns: `this`
+
+###### setSpatialGridEnabled(enabled, options?)
+Toggle spatial grid acceleration.
+Parameters:
+- `enabled`: `boolean` - Enable (true) or disable (false) spatial grid.
+- `options?`: `Object` - Options passed to `enableSpatialGrid()` if enabling.
+Returns: `this`
+
+###### detachSpatialGrid()
+Detach and dispose of the spatial grid, reverting to naive O(N²) neighbor search.
+Returns: `this`
+
+###### setDomainDimensions(dimensions)
+Manually set the simulation domain dimensions. Updates UBOs and synchronizes the spatial grid.
+Parameters:
+- `dimensions`: `THREE.Vector3` - New domain dimensions.
+Returns: `this`
+
+###### syncSpatialGrid()
+Synchronize spatial grid configuration with current zone radius and domain. Automatically called when parameters change.
+Returns: `this`
+
+###### step(renderer)
+Advance the simulation by one frame using GPU compute passes. Executes: grid update (if enabled) → GPU init (first frame) → velocity → position.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer instance.
+Returns: `Promise.<void>`
+
+##### Example
+
+```js
+import { Boids } from '@three-blocks/core';
+import { ConeGeometry, InstancedMesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { instanceIndex } from 'three/tsl';
+
+// Basic usage with material positionNode
+const boids = new Boids({
+  count: 5000,
+  is3D: true,
+  domainDimensions: new THREE.Vector3(200, 200, 200),
+  separation: 0.025,
+  alignment: 0.03,
+  cohesion: 0.08,
+  useRelativeParameters: true,
+  useMatrices: true
+});
+
+// Create instanced mesh for rendering
+const geometry = new ConeGeometry(0.5, 1.5, 4);
+const material = new MeshStandardNodeMaterial();
+material.positionNode = boids.instanceMatrix().element( instanceIndex );
+const mesh = new InstancedMesh(geometry, material, boids.particleCount);
+// When useMatrices is enabled, you can feed instance matrices directly
+mesh.instanceMatrix = boids.buffers.instanceMatrices.value;
+scene.add(mesh);
+
+// Simulation loop
+function animate() {
+  boids.step(renderer);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+```
+
+See also: SpatialGrid
+
+Demo: https://three-blocks.com/docs/demos/boids/
+
+---
+
+#### BVHVolumeConstraint
+**Kind:** Class
+
+```js
+import { BVHVolumeConstraint } from '@three-blocks/core';
+```
+
+BVHVolumeConstraint - Direct BVH boundary constraint for particle simulations.
+
+Unlike SDFVolumeConstraint which requires SDF precomputation, this class queries the BVH directly each frame. Best for dynamic meshes or when SDF resolution would be prohibitively high.
+
+Supports two modes:
+
+- `'triangles'` (default): For triangle meshes, uses signed distance for inside/outside detection
+- `'points'`: For point clouds (like Gaussian Splat centers), uses pointRadius shell around each point
+
+##### Properties
+- `geometry`: `THREE.BufferGeometry`
+- `bvh`: `*`
+- `mode`: `string`
+- `stiffness`: `number`
+- `damping`: `number`
+- `threshold`: `number`
+- `pointRadius`: `number`
+- `maxSearchDistance`: `number`
+- `containment`: `boolean`
+- `boundsMatrix`: `THREE.Matrix4`
+- `inverseBoundsMatrix`: `THREE.Matrix4`
+
+##### Methods
+
+###### setWorldMatrix(matrix)
+Sets the world transformation matrix for the BVH mesh.
+Parameters:
+- `matrix`: `THREE.Matrix4` - World transformation matrix
+
+###### apply(renderer, positionsBuffer, velocitiesBuffer, particleCount)
+Applies the BVH boundary constraint to particle buffers.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer
+- `positionsBuffer`: `THREE.StorageBufferAttribute` - Particle positions
+- `velocitiesBuffer`: `THREE.StorageBufferAttribute` - Particle velocities
+- `particleCount`: `number` - Number of particles
+Returns: `Promise.<void>`
+
+###### updateBVH(geometry, bvh?)
+Updates the BVH data (for dynamic meshes).
+Parameters:
+- `geometry`: `THREE.BufferGeometry` - Updated geometry
+- `bvh?`: `*` = null - Updated BVH (auto-retrieved from geometry.boundsTree if not provided)
+
+###### dispose()
+Disposes GPU resources.
+
+---
+
+#### PBF
+**Kind:** Class
+
+```js
+import { PBF } from '@three-blocks/core';
+```
+
+Position Based Fluids (PBF) particle simulation optimized for GPU compute with optional spatial grid acceleration.
+
+##### Properties
+- `sdfVolumeConstraint`: `SDFVolumeConstraint | null`
+- `bvhVolumeConstraint`: `BVHVolumeConstraint | null`
+
+##### Methods
+
+###### setDomainDimensions(dimensions)
+Manually set the simulation domain dimensions. Updates UBOs and synchronizes the spatial grid.
+Parameters:
+- `dimensions`: `THREE.Vector3` - New domain dimensions.
+Returns: `this`
+
+###### setDomainFromObject(object, options?, options.padding?, options.autoUpdate?, options.simulationScale?)
+Bind simulation domain to a Three.js object's world-space bounds. Particles will be constrained to the object's local space and follow its transforms.
+Parameters:
+- `object`: `THREE.Object3D` - Target object (mesh or group).
+- `options?`: `Object` = {} - Configuration options.
+- `options.padding?`: `number | THREE.Vector3` = 0 - Extend domain bounds by padding.
+- `options.autoUpdate?`: `boolean` = true - Update domain matrices every frame.
+- `options.simulationScale?`: `number | THREE.Vector3` = null - Override domain scale for visualization.
+Returns: `this`
+
+###### attachSpatialGrid(grid)
+Attach an external `SpatialGrid` instance for neighbor acceleration. Rebuilds compute passes to use grid-accelerated lookups.
+Parameters:
+- `grid`: `SpatialGrid` - External SpatialGrid instance.
+Returns: `this`
+
+###### setSmoothingRadius(radius)
+Update the PBF smoothing kernel radius (h parameter). Recomputes kernel coefficients and syncs spatial grid cell size.
+Parameters:
+- `radius`: `number` - New smoothing radius (h).
+Returns: `this`
+
+###### setRestDensity(value)
+Set rest density manually. Passing null/undefined re-enables auto rest density.
+Parameters:
+- `value`: `number | null | undefined`
+Returns: `this`
+
+###### setMass(value)
+Set particle mass. Recomputes auto rest density when enabled.
+Parameters:
+- `value`: `number`
+Returns: `this`
+
+###### setKernelScaleEnabled(enabled)
+Enable/disable automatic kernel radius scaling with domain transformations.
+Parameters:
+- `enabled`: `boolean` - Whether to scale h with domain scale.
+Returns: `this`
+
+###### setGridUpdatePerIteration(enabled)
+Control whether the spatial grid rebuilds each solver iteration or once per step.
+Parameters:
+- `enabled`: `boolean` - When true, rebuild on every solver iteration (slower, more accurate).
+Returns: `this`
+
+###### enableSpatialGrid(options?)
+Create and attach an internal spatial grid for neighbor acceleration. Automatically configures grid based on current domain and kernel radius.
+Parameters:
+- `options?`: `Object` = {} - Options forwarded to `SpatialGrid` constructor.
+Returns: `this`
+
+###### setSpatialGridEnabled(enabled, options?)
+Toggle spatial grid acceleration.
+Parameters:
+- `enabled`: `boolean` - Enable (true) or disable (false) spatial grid.
+- `options?`: `Object` - Options passed to `enableSpatialGrid()` if enabling.
+Returns: `this`
+
+###### detachSpatialGrid()
+Detach and dispose of the spatial grid, reverting to naive O(N²) neighbor search.
+Returns: `this`
+
+###### syncSpatialGrid()
+Synchronize spatial grid configuration with current domain and kernel radius. Automatically called when domain or kernel changes.
+Returns: `this`
+
+###### step(renderer)
+Advance the simulation by one frame using GPU compute passes. Executes: grid update → density → pressure → forces → interaction → integration.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer instance.
+Returns: `Promise.<void>`
+
+###### attachGUI(gui, options?, options.folderName?, options.open?)
+Attach PBF parameters to a GUI for interactive tuning. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `gui`: `Object` - GUI instance (e.g., `new GUI()` from lil-gui or renderer.inspector.createParameters()).
+- `options?`: `Object` = {} - Configuration options.
+- `options.folderName?`: `string` = 'PBF' - Name for the main folder.
+- `options.open?`: `boolean` = false - Whether folders start open.
+Returns: `Object` - Object containing created GUI folders: `{ main, physics, simulation, domain, pointer }`.
+
+###### disposeGUI()
+Detach the PBF parameters GUI.
+
+##### Example
+
+```js
+import { PBF } from '@three-blocks/core';
+import { SphereGeometry, InstancedMesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { storage, instanceIndex } from 'three/tsl';
+
+const pbf = new PBF({
+  count: 2000,
+  is3D: true,
+  domainDimensions: new THREE.Vector3(20, 20, 20),
+  h: 1.2,
+  viscosityMu: 0.15,
+  useMatrices: true
+});
+
+// Create instanced mesh for rendering particles
+const geometry = new SphereGeometry(0.3, 8, 8);
+const material = new MeshStandardNodeMaterial();
+const positionNode = storage(pbf.buffers.positions, 'vec3', pbf.particleCount);
+material.positionNode = positionNode.element(instanceIndex);
+const mesh = new InstancedMesh(geometry, material, pbf.particleCount);
+// When useMatrices is enabled, you can feed instance matrices directly
+mesh.instanceMatrix = pbf.buffers.instanceMatrices.value;
+scene.add(mesh);
+
+// Simulation loop
+async function animate() {
+  await pbf.step(renderer);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+```
+
+See also: SpatialGrid
+
+Demo: https://three-blocks.com/docs/demos/pbf/
+
+---
+
+#### SPH
+**Kind:** Class
+
+```js
+import { SPH } from '@three-blocks/core';
+```
+
+Smoothed Particle Hydrodynamics (SPH) fluid simulation with spatial grid acceleration.
+
+**Features**
+
+- Pressure, viscosity, and gravity forces with configurable SPH kernels (Poly6, Spiky, Viscosity)
+- Spatial grid acceleration (default) or naive O(N²) neighbor search
+- 2D and 3D modes with appropriate kernel functions
+- Domain attachment to Three.js objects for dynamic boundary transforms
+- Pointer-based interaction for user-driven forces
+- Optional direction storage for oriented particle rendering
+
+**Architecture**
+
+- Compute passes: density → pressure → forces (pressure + viscosity) → interaction → integration
+- Spatial grid reduces neighbor search from O(N²) to O(N) via cell hashing
+- Domain matrix transforms allow particles to follow moving/rotating objects
+- Kernel radius auto-scales with domain transformations when `scaleKernelWithDomain` is enabled
+
+##### Properties
+- `sdfVolumeConstraint`: `SDFVolumeConstraint | null`
+- `bvhVolumeConstraint`: `BVHVolumeConstraint | null`
+
+##### Methods
+
+###### setDomainDimensions(dimensions)
+Manually set the simulation domain dimensions. Updates UBOs and synchronizes the spatial grid.
+Parameters:
+- `dimensions`: `THREE.Vector3` - New domain dimensions.
+Returns: `this`
+
+###### setDomainFromObject(object, options?, options.padding?, options.autoUpdate?, options.simulationScale?)
+Bind simulation domain to a Three.js object's world-space bounds. Particles will be constrained to the object's local space and follow its transforms.
+Parameters:
+- `object`: `THREE.Object3D` - Target object (mesh or group).
+- `options?`: `Object` = {} - Configuration options.
+- `options.padding?`: `number | THREE.Vector3` = 0 - Extend domain bounds by padding.
+- `options.autoUpdate?`: `boolean` = true - Update domain matrices every frame.
+- `options.simulationScale?`: `number | THREE.Vector3` = null - Override domain scale for visualization.
+Returns: `this`
+
+###### attachSpatialGrid(grid)
+Attach an external `SpatialGrid` instance for neighbor acceleration. Rebuilds compute passes to use grid-accelerated lookups.
+Parameters:
+- `grid`: `SpatialGrid` - External SpatialGrid instance.
+Returns: `this`
+
+###### setSmoothingRadius(radius)
+Update the SPH smoothing kernel radius (h parameter). Recomputes kernel coefficients and syncs spatial grid cell size.
+Parameters:
+- `radius`: `number` - New smoothing radius (h).
+Returns: `this`
+
+###### setRestDensity(value)
+Set rest density manually. Passing null/undefined re-enables auto rest density.
+Parameters:
+- `value`: `number | null | undefined`
+Returns: `this`
+
+###### setMass(value)
+Set particle mass. Recomputes auto rest density when enabled.
+Parameters:
+- `value`: `number`
+Returns: `this`
+
+###### setKernelScaleEnabled(enabled)
+Enable/disable automatic kernel radius scaling with domain transformations.
+Parameters:
+- `enabled`: `boolean` - Whether to scale h with domain scale.
+Returns: `this`
+
+###### enableSpatialGrid(options?)
+Create and attach an internal spatial grid for neighbor acceleration. Automatically configures grid based on current domain and kernel radius.
+Parameters:
+- `options?`: `Object` = {} - Options forwarded to `SpatialGrid` constructor.
+Returns: `this`
+
+###### setSpatialGridEnabled(enabled, options?)
+Toggle spatial grid acceleration.
+Parameters:
+- `enabled`: `boolean` - Enable (true) or disable (false) spatial grid.
+- `options?`: `Object` - Options passed to `enableSpatialGrid()` if enabling.
+Returns: `this`
+
+###### detachSpatialGrid()
+Detach and dispose of the spatial grid, reverting to naive O(N²) neighbor search.
+Returns: `this`
+
+###### syncSpatialGrid()
+Synchronize spatial grid configuration with current domain and kernel radius. Automatically called when domain or kernel changes.
+Returns: `this`
+
+###### step(renderer)
+Advance the simulation by one frame using GPU compute passes. Executes: grid update → density → pressure → forces → interaction → integration.
+Parameters:
+- `renderer`: `THREE.WebGPURenderer` - WebGPU renderer instance.
+Returns: `Promise.<void>`
+
+###### attachGUI(gui, options?, options.folderName?, options.open?)
+Attach SPH parameters to a GUI for interactive tuning. Compatible with lil-gui, dat.gui, and Three.js Inspector.
+Parameters:
+- `gui`: `Object` - GUI instance (e.g., `new GUI()` from lil-gui or renderer.inspector.createParameters()).
+- `options?`: `Object` = {} - Configuration options.
+- `options.folderName?`: `string` = 'SPH' - Name for the main folder.
+- `options.open?`: `boolean` = false - Whether folders start open.
+Returns: `Object` - Object containing created GUI folders: `{ main, physics, simulation, domain, pointer }`.
+
+###### disposeGUI()
+Detach the SPH parameters GUI.
+
+##### Example
+
+```js
+import { SPH } from '@three-blocks/core';
+import { SphereGeometry, InstancedMesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { storage, instanceIndex } from 'three/tsl';
+
+const sph = new SPH({
+  count: 2000,
+  is3D: true,
+  domainDimensions: new THREE.Vector3(20, 20, 20),
+  h: 1.2,
+  viscosityMu: 0.15,
+  useMatrices: true
+});
+
+// Create instanced mesh for rendering particles
+const geometry = new SphereGeometry(0.3, 8, 8);
+const material = new MeshStandardNodeMaterial();
+const positionNode = storage(sph.buffers.positions, 'vec3', sph.particleCount);
+material.positionNode = positionNode.element(instanceIndex);
+const mesh = new InstancedMesh(geometry, material, sph.particleCount);
+// When useMatrices is enabled, you can feed instance matrices directly
+mesh.instanceMatrix = sph.buffers.instanceMatrices.value;
+scene.add(mesh);
+
+// Simulation loop
+async function animate() {
+  await sph.step(renderer);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+```
+
+See also: SpatialGrid
+
+Demo: https://three-blocks.com/docs/demos/sph/
+
+---
+
+### Helpers
+
+#### GaussianSplatsHelper
+**Kind:** Class
+
+```js
+import { GaussianSplatsHelper } from '@three-blocks/core';
+```
+
+Debug helper for visualizing Gaussian Splat bounding boxes.
+
+Helps debug splat placement by showing:
+
+- Overall bounding box of the entire model
+- Per-instance oriented 3D wireframe boxes showing individual splat extents
+
+For point cloud visualization, use GaussianSplatsPoints instead.
+
+Extends: THREE.Object3D
+
+##### Methods
+
+###### update()
+Update visualizations when splat data changes.
+
+###### dispose()
+Dispose of helper resources.
+
+---
+
+#### GaussianSplatsPoints
+**Kind:** Class
+
+```js
+import { GaussianSplatsPoints } from '@three-blocks/core';
+```
+
+Visualizes Gaussian Splat positions as a point cloud.
+
+Provides a lightweight point cloud overlay showing the center positions of all splats in a GaussianSplats instance.
+
+Extends: THREE.Points
+
+##### Methods
+
+###### update()
+Update point positions when splat data changes.
+
+###### dispose()
+Dispose of resources.
+
+---
+
+## Additional Resources
+
+- [Navigation Index](https://threejs-blocks.com/llm/core/llms.txt): Lightweight index for LLMs
+- [LLM Guide](https://threejs-blocks.com/llm/core/LLM_GUIDE.md): Integration checklist
+- [Documentation](https://threejs-blocks.com/docs): Interactive documentation site
+- [Examples](https://threejs-blocks.com/docs/demos): Live demos with source code
+- [GitHub](https://github.com/renaudrohlinger/three-blocks): Source code and issues
+
+Generated: 2026-01-31T09:46:56.000Z
