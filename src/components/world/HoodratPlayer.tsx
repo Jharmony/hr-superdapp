@@ -164,6 +164,8 @@ export function HoodratPlayer({
     companionGroupRef,
   );
   const companionBaseYRef = useRef<number>(0);
+  const companionRootBoneRef = useRef<THREE.Bone | null>(null);
+  const companionRootBaseRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const prevCompanionActionRef = useRef<THREE.AnimationAction | null>(null);
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
@@ -304,6 +306,8 @@ export function HoodratPlayer({
     for (let i = g.children.length - 1; i >= 0; i--) {
       g.remove(g.children[i]!);
     }
+    companionRootBoneRef.current = null;
+    companionRootBaseRef.current = null;
     if (companionScene) {
       const c = companionScene;
       c.scale.setScalar(1);
@@ -312,6 +316,26 @@ export function HoodratPlayer({
       const box = new THREE.Box3().setFromObject(c);
       c.position.y = -box.min.y - feetSink;
       companionBaseYRef.current = c.position.y;
+      // Root-motion on this rig is authored on the skeleton root/hips, not the scene node.
+      // Cache that bone so we can lock its X/Z (and keep the companion glued to the player).
+      let root: THREE.Bone | null = null;
+      c.traverse((o) => {
+        if (root) return;
+        if (!(o instanceof THREE.Bone)) return;
+        const n = o.name.toLowerCase();
+        if (n === 'hips' || n.endsWith('hips') || n.includes('mixamorig') || n.includes('root')) {
+          root = o;
+        }
+      });
+      // Fallback: first bone in the tree.
+      if (!root) {
+        c.traverse((o) => {
+          if (root) return;
+          if (o instanceof THREE.Bone) root = o;
+        });
+      }
+      companionRootBoneRef.current = root;
+      if (root) companionRootBaseRef.current = { x: root.position.x, y: root.position.y, z: root.position.z };
       g.add(c);
     }
   }, [companionScene, feetSink]);
@@ -335,11 +359,18 @@ export function HoodratPlayer({
   useFrame((_, dt) => {
     if (mixer) mixer.update(dt);
     if (companionMixer && companionScene) companionMixer.update(dt);
-    // Companion clips appear to include root-motion; clamp it so the pet never drifts away.
+    // Companion clips include root-motion; clamp it so the pet never drifts away.
     if (companionScene) {
       companionScene.position.x = 0;
       companionScene.position.z = 0;
       companionScene.position.y = companionBaseYRef.current;
+      const root = companionRootBoneRef.current;
+      const base = companionRootBaseRef.current;
+      if (root && base) {
+        root.position.x = base.x;
+        root.position.z = base.z;
+        // keep authored vertical bounce (y) but prevent “walk away”
+      }
     }
 
     const locked = pointerLockedRef.current;
