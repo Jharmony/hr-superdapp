@@ -41,8 +41,15 @@ export function useBackpackWorldVisuals(activeTokenId: number | null): {
   const backpackNftCount = nfts.length;
 
   const companionEntry = useMemo(() => {
-    return nfts.find((n) => n.contract?.toLowerCase() === HOODRATS_LC) ?? null;
-  }, [nfts]);
+    const hoodrats = nfts.filter((n) => n.contract?.toLowerCase() === HOODRATS_LC);
+    if (hoodrats.length === 0) return null;
+    // Prefer a different token id than the active rat if possible (avoids “same tint” confusion).
+    if (activeTokenId != null) {
+      const alt = hoodrats.find((n) => Number(n.tokenId) !== activeTokenId);
+      if (alt) return alt;
+    }
+    return hoodrats[0] ?? null;
+  }, [nfts, activeTokenId]);
 
   const companionTokenId = companionEntry ? Number(companionEntry.tokenId) : null;
   const validCompanionId =

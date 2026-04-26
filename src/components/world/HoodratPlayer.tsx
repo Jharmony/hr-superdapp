@@ -163,6 +163,7 @@ export function HoodratPlayer({
     gltf.animations,
     companionGroupRef,
   );
+  const companionBaseYRef = useRef<number>(0);
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
@@ -302,6 +303,7 @@ export function HoodratPlayer({
       c.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(c);
       c.position.y = -box.min.y - feetSink;
+      companionBaseYRef.current = c.position.y;
       g.add(c);
     }
   }, [companionScene, feetSink]);
@@ -325,6 +327,12 @@ export function HoodratPlayer({
   useFrame((_, dt) => {
     if (mixer) mixer.update(dt);
     if (companionMixer && companionScene) companionMixer.update(dt);
+    // Companion clips appear to include root-motion; clamp it so the pet never drifts away.
+    if (companionScene) {
+      companionScene.position.x = 0;
+      companionScene.position.z = 0;
+      companionScene.position.y = companionBaseYRef.current;
+    }
 
     const locked = pointerLockedRef.current;
     const { forward, back, left, right, run, jump } = get();
