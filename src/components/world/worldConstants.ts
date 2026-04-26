@@ -20,8 +20,11 @@ export const FP_EYE_Y = 2.12;
 export const FP_FORWARD_OFFSET = 0.32;
 export const VISUAL_TURN_SPEED = 10;
 
-/** Extra drop after bbox foot snap — tuned for Hoodrat skinned mesh. */
-export const CYBER_FEET_SINK = 3.88;
+/**
+ * Coarse foot drop after static bbox snap when **not** using `snapFeetToGround` on `HoodratPlayer`.
+ * Cyber district uses animated precise snap instead; this stays a small default for other callers.
+ */
+export const CYBER_FEET_SINK = 0.04;
 
 export const keyMap: KeyboardControlsEntry[] = [
   { name: 'forward', keys: ['ArrowUp', 'KeyW'] },

@@ -32,13 +32,21 @@ export function disposeColoredHoodratScene(root: THREE.Object3D) {
 }
 
 /**
- * Tribe tint must survive albedo maps: `color` alone is often invisible. We set
- * `color` + emissive so the NFT palette reads on the shared GLB.
+ * Tribe tint on skin materials: `color` multiplies the baseColor map in the shader.
+ *
+ * We **do not** paint full emissive on top when a map exists — black regions (wristbands,
+ * clothing trim on the limb atlas, dark fur) stay dark. Previously emissive matched the
+ * tribe hex everywhere, which made black UVs glow the skin color and made faces look noisy.
  */
 function applyTribeSkinTint(mat: THREE.Material, hex: string) {
   if (!(mat instanceof THREE.MeshStandardMaterial)) return;
   const tint = new THREE.Color(hex);
   mat.color.copy(tint);
+  if (mat.map) {
+    mat.emissive.set(0, 0, 0);
+    mat.emissiveIntensity = 0;
+    return;
+  }
   mat.emissive.copy(tint);
   const lum = 0.2126 * tint.r + 0.7152 * tint.g + 0.0722 * tint.b;
   mat.emissiveIntensity = lum < 0.08 ? 0.5 : lum < 0.22 ? 0.38 : 0.26;

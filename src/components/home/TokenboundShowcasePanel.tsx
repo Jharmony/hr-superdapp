@@ -61,11 +61,8 @@ export function TokenboundShowcasePanel() {
       ? (metaErr instanceof Error ? metaErr.message : 'Could not load metadata')
       : null;
 
-  const prerenderMax = Number(import.meta.env.PUBLIC_STATIC_RAT_COUNT ?? 50);
-  const detailHref =
-    tokenId > 0 && tokenId <= prerenderMax
-      ? `/rats/${tokenId}/`
-      : `/rats/?id=${tokenId}`;
+  /** Token pages render on-demand on Vercel (`/rats/[id]`). */
+  const detailHref = `/rats/${tokenId}/`;
 
   return (
     <div className="mx-auto mt-8 w-full max-w-4xl rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4 md:p-6">

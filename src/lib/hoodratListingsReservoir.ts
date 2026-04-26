@@ -13,7 +13,9 @@ export type HoodratListingRow = {
   tokenId: number;
   tokenName?: string;
   tokenImage?: string;
-  /** Trait map when Reservoir returns token attributes (best-effort). */
+  /** Extra image URLs (e.g. OpenSea CDN vs original) when the primary thumbnail fails. */
+  tokenImageAlternates?: string[];
+  /** Trait map when the order includes token attributes (OpenSea NFT metadata, Reservoir, etc.). */
   tokenTraits?: Record<string, string>;
   priceEth: number | null;
   priceUsd: number | null;
@@ -126,8 +128,29 @@ function extractTokenName(order: Record<string, unknown>): string | undefined {
 
 function extractTokenImage(order: Record<string, unknown>): string | undefined {
   const t = asRecord(order.token);
-  const img = t?.image;
+  const img =
+    t?.image ??
+    t?.display_image_url ??
+    t?.displayImageUrl ??
+    t?.image_url ??
+    t?.imageUrl ??
+    t?.original_image_url;
   return typeof img === 'string' && img.trim() ? img.trim() : undefined;
+}
+
+function extractTokenImageAlternates(order: Record<string, unknown>): string[] | undefined {
+  const t = asRecord(order.token);
+  const raw = t?.imageFallbacks;
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((x): x is string => typeof x === 'string' && x.trim()).map((x) => x.trim());
+  const seen = new Set<string>();
+  const dedup: string[] = [];
+  for (const u of out) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    dedup.push(u);
+  }
+  return dedup.length ? dedup : undefined;
 }
 
 function extractTokenTraits(order: Record<string, unknown>): Record<string, string> | undefined {
@@ -169,6 +192,7 @@ function parseOrder(order: unknown): HoodratListingRow | null {
     tokenId,
     tokenName: extractTokenName(o),
     tokenImage: extractTokenImage(o),
+    tokenImageAlternates: extractTokenImageAlternates(o),
     tokenTraits: extractTokenTraits(o),
     priceEth: eth,
     priceUsd: usd,
@@ -183,8 +207,8 @@ export type HoodratListingsPage = {
 };
 
 /**
- * Active sell-side orders for the Hoodrats contract (Ethereum mainnet via Reservoir).
- * Optional `PUBLIC_RESERVOIR_API_KEY` raises rate limits (safe to expose only if you accept client-side use).
+ * Active sell-side orders for the Hoodrats contract (Ethereum mainnet).
+ * Data comes from the same-origin `/api/reservoir/asks.json` proxy (OpenSea listings + per-token metadata).
  */
 export async function fetchHoodratListingsPage(
   continuation: string | null,

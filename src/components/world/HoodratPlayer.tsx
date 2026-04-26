@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { resolvePlayerXZ, type XZRect } from './collision';
+import { sampleWalkableTerrainY } from './urTerrainGround';
 import {
   CAM_DIST,
   CAM_HEIGHT,
@@ -18,6 +19,7 @@ import {
   JUMP_VELOCITY,
   PITCH_MAX,
   PITCH_MIN,
+  PLAYER_RADIUS,
   RUN_SPEED,
   VISUAL_TURN_SPEED,
   WALK_SPEED,
@@ -50,6 +52,7 @@ const tmpFwd = new THREE.Vector3();
 const tmpRight = new THREE.Vector3();
 const tmpMove = new THREE.Vector3();
 const tmpCamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _footAlignBox = new THREE.Box3();
 
 export type HoodratPortalConfig = {
   x: number;
@@ -64,9 +67,23 @@ export function HoodratPlayer({
   obstacleRects,
   worldXZLim,
   initialXZ,
+  initialCamYaw = Math.PI,
   groundY = GROUND_Y,
   feetSink = CYBER_FEET_SINK,
   modelScale = 1.12,
+  /**
+   * After the animation mixer has run a few frames, re-measure the mesh with a **precise**
+   * skinned AABB (`Box3.setFromObject(..., true)`) and shift `worldScene.position.y` so soles
+   * sit on `groundY`. Fixes cyber “floating rat” where layout-time bbox used bind-pose geometry.
+   */
+  snapFeetToGround = false,
+  /** World Y for sole bottoms: `groundY` minus this (meters), so feet sit slightly in the floor. */
+  footSkinEpsilon = 0.028,
+  /**
+   * Ur rift: raycast walkable mesh under the feet for steps / thresholds; cyber omits.
+   * `soleBias` adds a small upward nudge to sampled Y so skinned soles stay on the paint.
+   */
+  terrainGround,
   portal,
 }: {
   onLockChange: (locked: boolean) => void;
@@ -74,9 +91,14 @@ export function HoodratPlayer({
   obstacleRects: XZRect[];
   worldXZLim: number;
   initialXZ?: { x: number; z: number };
+  /** Third-person orbit starting yaw (rad). Cyber uses `0` so the camera sits behind the rat toward the portal (−Z). */
+  initialCamYaw?: number;
   groundY?: number;
   feetSink?: number;
   modelScale?: number;
+  snapFeetToGround?: boolean;
+  footSkinEpsilon?: number;
+  terrainGround?: { root: THREE.Object3D; minY: number; maxY: number; soleBias?: number };
   portal: HoodratPortalConfig | null;
 }) {
   const gltf = useGLTF(MODEL_URL);
@@ -93,7 +115,7 @@ export function HoodratPlayer({
   const playerPos = useRef(
     new THREE.Vector3(initialXZ?.x ?? 0, groundY, initialXZ?.z ?? 0),
   );
-  const camYaw = useRef(Math.PI);
+  const camYaw = useRef(initialCamYaw);
   const orbitPitch = useRef(0.3);
   const lookPitch = useRef(0);
   const firstPersonRef = useRef(false);
@@ -107,6 +129,8 @@ export function HoodratPlayer({
   obstaclesRef.current = obstacleRects;
   const limRef = useRef(worldXZLim);
   limRef.current = worldXZLim;
+  const footGroundSnapDoneRef = useRef(false);
+  const footGroundSnapFrameRef = useRef(0);
 
   const fadeTo = useCallback((next: THREE.AnimationAction | null | undefined) => {
     if (!next) return;
@@ -204,7 +228,11 @@ export function HoodratPlayer({
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene);
     scene.position.y = -box.min.y - feetSink;
-  }, [feetSink, modelScale, worldScene]);
+    if (snapFeetToGround) {
+      footGroundSnapDoneRef.current = false;
+      footGroundSnapFrameRef.current = 0;
+    }
+  }, [feetSink, modelScale, snapFeetToGround, worldScene]);
 
   useEffect(() => {
     if (!actions || !clips.idle || !actions[clips.idle]) return;
@@ -218,7 +246,29 @@ export function HoodratPlayer({
     const { forward, back, left, right, run, jump } = get();
     const moving = forward || back || left || right;
 
-    let onGround = playerPos.current.y <= groundY + GROUND_EPS;
+    const px0 = playerPos.current.x;
+    const pz0 = playerPos.current.z;
+    const py0 = playerPos.current.y;
+
+    const floorAt = (x: number, z: number, refY: number): number => {
+      if (!terrainGround) return groundY;
+      const s = sampleWalkableTerrainY(terrainGround.root, x, z, refY, {
+        minY: terrainGround.minY,
+        maxY: terrainGround.maxY,
+        normalMinY: 0.44,
+        originYOffset: 0.72,
+        originMinPad: 0.36,
+        farShort: 3.25,
+        farLong: 22,
+      });
+      const bias = terrainGround.soleBias ?? 0;
+      const raw = s !== null ? s + bias : groundY;
+      /** Reject wild ray errors; still allow subway ~12 m below nominal street foot Y. */
+      return THREE.MathUtils.clamp(raw, groundY - 12.5, groundY + 5.2);
+    };
+
+    const floor0 = floorAt(px0, pz0, py0);
+    let onGround = py0 <= floor0 + GROUND_EPS && velocityY.current <= 0.001;
 
     if (locked && jump && !jumpKeyPrevRef.current && onGround) {
       velocityY.current = JUMP_VELOCITY;
@@ -227,11 +277,15 @@ export function HoodratPlayer({
 
     velocityY.current += GRAVITY * dt;
     playerPos.current.y += velocityY.current * dt;
-    if (playerPos.current.y <= groundY) {
+
+    const floorMid = floorAt(px0, pz0, playerPos.current.y);
+    if (velocityY.current < 0 && playerPos.current.y <= floorMid + GROUND_EPS) {
+      playerPos.current.y = floorMid;
+      velocityY.current = 0;
+    } else if (!terrainGround && playerPos.current.y <= groundY) {
       playerPos.current.y = groundY;
       if (velocityY.current < 0) velocityY.current = 0;
     }
-    onGround = playerPos.current.y <= groundY + GROUND_EPS;
 
     if (locked && moving) {
       if (firstPersonRef.current) {
@@ -265,6 +319,9 @@ export function HoodratPlayer({
           playerPos.current.z,
           dx,
           dz,
+          terrainGround
+            ? { narrowDoorSlide: true, collisionRadius: PLAYER_RADIUS * 0.94 }
+            : undefined,
         );
         playerPos.current.x = resolved.x;
         playerPos.current.z = resolved.z;
@@ -277,6 +334,29 @@ export function HoodratPlayer({
           vis.rotation.y = cur + delta * Math.min(1, VISUAL_TURN_SPEED * dt);
         }
       }
+    }
+
+    if (terrainGround) {
+      const f1 = floorAt(playerPos.current.x, playerPos.current.z, playerPos.current.y);
+      if (velocityY.current <= 0) {
+        const dy = f1 - playerPos.current.y;
+        /** Wider band so stair flights and subway ramps snap in one frame without snagging. */
+        if (dy >= -GROUND_EPS && dy <= 2.45) {
+          playerPos.current.y = f1;
+          if (dy > -0.14) velocityY.current = 0;
+        } else if (dy > 2.45) {
+          playerPos.current.y += Math.min(dy * 0.28, 0.55);
+          velocityY.current = 0;
+        } else if (dy < -GROUND_EPS) {
+          playerPos.current.y = f1;
+          velocityY.current = 0;
+        }
+        onGround = playerPos.current.y <= f1 + GROUND_EPS;
+      } else {
+        onGround = false;
+      }
+    } else {
+      onGround = playerPos.current.y <= groundY + GROUND_EPS;
     }
 
     const inAir = !onGround;
@@ -319,6 +399,31 @@ export function HoodratPlayer({
     const p = playerPos.current;
     if (groupRef.current) {
       groupRef.current.position.copy(p);
+    }
+
+    if (
+      snapFeetToGround &&
+      !footGroundSnapDoneRef.current &&
+      mixer &&
+      visualRef.current &&
+      onGround
+    ) {
+      footGroundSnapFrameRef.current += 1;
+      if (footGroundSnapFrameRef.current >= 10) {
+        visualRef.current.updateMatrixWorld(true);
+        _footAlignBox.makeEmpty();
+        _footAlignBox.setFromObject(visualRef.current, true);
+        if (!_footAlignBox.isEmpty()) {
+          const targetSoleY = terrainGround
+            ? floorAt(p.x, p.z, p.y) - footSkinEpsilon
+            : groundY - footSkinEpsilon;
+          const err = targetSoleY - _footAlignBox.min.y;
+          if (Number.isFinite(err) && Math.abs(err) < 6) {
+            worldScene.position.y += err;
+          }
+        }
+        footGroundSnapDoneRef.current = true;
+      }
     }
 
     if (portal) {

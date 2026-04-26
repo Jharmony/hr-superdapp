@@ -12,7 +12,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
-import { GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
+import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
   (import.meta.env.PUBLIC_PORTAL_MODEL_URL as string | undefined)?.trim() ||
@@ -239,6 +239,9 @@ function WorldScene({
           onViewModeChange={onViewModeChange}
           obstacleRects={CYBER_OBSTACLE_XZ}
           worldXZLim={WORLD_XZ_LIM}
+          initialCamYaw={0}
+          feetSink={0}
+          snapFeetToGround
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -250,6 +253,16 @@ function WorldScene({
     </>
   );
 }
+
+/** Matches `HoodratPlayer` third-person defaults: camYaw 0, orbitPitch 0.3, player at origin on GROUND_Y. */
+const CYBER_INIT_ORBIT_PITCH = 0.3;
+const cyberInitialCameraPosition: [number, number, number] = [
+  0,
+  GROUND_Y +
+    Math.sin(CYBER_INIT_ORBIT_PITCH) * CAM_DIST +
+    CAM_HEIGHT,
+  Math.cos(CYBER_INIT_ORBIT_PITCH) * CAM_DIST,
+];
 
 function WorldCanvas({
   onLockChange,
@@ -265,7 +278,7 @@ function WorldCanvas({
       className="!h-full !w-full"
       shadows
       camera={{
-        position: [0, 2.35, 6.4],
+        position: cyberInitialCameraPosition,
         fov: 68,
         near: 0.05,
         far: 120,

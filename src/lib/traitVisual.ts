@@ -79,7 +79,8 @@ export const TRIBE_SKIN_NEVER_MESH_KEYS = new Set([
  * `Extract1` shirt/body atlas and will recolour the top.
  *
  * `polysphere10` is applied only on {@link TRIBE_POLYSPHERE10_HEAD_MESH_KEYS} so wrist
- * jewellery that reuses the same atlas does not pick up skin tint.
+ * jewellery that reuses the same atlas does not pick up skin tint. Wristbands share the
+ * limb atlas (Extract6) with skin; tint multiplies the map only (see hoodratTraitApplyThree).
  */
 export const TRIBE_SKIN_MATERIAL_NAME_KEYS = new Set([
   'polysphere1_20', // PolySphere1_2_1 / 1_2_2 — inner body / fur
