@@ -94,6 +94,29 @@ export function OwnedRatCard({
               No img
             </div>
           )}
+          {onSetActive && isActive ? (
+            <span
+              className="pointer-events-none absolute left-1 top-1 z-10 rounded border border-lime-400/55 bg-zinc-950/90 px-1 py-px text-[7px] font-bold uppercase tracking-wide text-lime-300 shadow-sm backdrop-blur-sm"
+              aria-hidden
+            >
+              Active
+            </span>
+          ) : null}
+          {onSetActive && !isActive && !loading && !errMsg ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSetActive();
+              }}
+              title="Set as active rat for 3D worlds"
+              aria-label="Set as active rat for 3D worlds"
+              className="absolute left-1 top-1 z-10 flex h-6 min-w-[1.35rem] items-center justify-center rounded border border-zinc-600/90 bg-zinc-950/90 px-1 text-[11px] font-bold leading-none text-lime-300 shadow-md backdrop-blur-sm transition hover:border-lime-500/50 hover:bg-zinc-900 hover:text-lime-200"
+            >
+              +
+            </button>
+          ) : null}
         </div>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 p-4">
           <div>
@@ -134,22 +157,6 @@ export function OwnedRatCard({
             >
               {studioOpen ? 'Hide 3D' : '3D + GLB'}
             </button>
-            {onSetActive ? (
-              isActive ? (
-                <span className="inline-flex items-center rounded-lg border border-lime-400/40 bg-lime-950/35 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-lime-200">
-                  Active in worlds
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  disabled={Boolean(errMsg) || loading}
-                  onClick={onSetActive}
-                  className="inline-flex rounded-lg border border-zinc-600 bg-zinc-800/60 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:border-cyan-500/40 hover:bg-zinc-800 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Set as active rat
-                </button>
-              )
-            ) : null}
           </div>
         </div>
       </div>

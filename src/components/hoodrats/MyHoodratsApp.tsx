@@ -106,9 +106,10 @@ function MyHoodratsInner() {
                   </div>
                 ) : (
                   <p className="mt-8 max-w-2xl rounded-xl border border-zinc-800/90 bg-zinc-900/30 px-4 py-3 text-xs leading-relaxed text-zinc-500">
-                    Choose <span className="font-medium text-zinc-400">Set as active rat</span> on a
-                    token below so the cyber / UR worlds load your tribe skin tint from on-chain
-                    metadata (connect the wallet that holds the rat).
+                    Tap the <span className="font-medium text-zinc-400">+</span> on a rat’s thumbnail
+                    (top-left) to set the active Hoodrat for 3D worlds, or use the{' '}
+                    <span className="font-medium text-zinc-400">Active</span> chip in the header once
+                    you have one — tribe tint comes from on-chain metadata.
                   </p>
                 )}
                 <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
