@@ -3,6 +3,7 @@ import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { WagmiProvider } from 'wagmi';
 import { useState, type ReactNode } from 'react';
 import { wagmiConfig } from '../../lib/wagmi-config';
+import { HoodratRainbowAvatar } from './HoodratRainbowAvatar';
 import '@rainbow-me/rainbowkit/styles.css';
 
 export function Web3Providers({ children }: { children: ReactNode }) {
@@ -12,6 +13,7 @@ export function Web3Providers({ children }: { children: ReactNode }) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
+          avatar={HoodratRainbowAvatar}
           theme={darkTheme({
             accentColor: '#a3e635',
             accentColorForeground: '#0a0a0a',
