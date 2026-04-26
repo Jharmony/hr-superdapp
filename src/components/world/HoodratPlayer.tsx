@@ -164,6 +164,7 @@ export function HoodratPlayer({
     companionGroupRef,
   );
   const companionBaseYRef = useRef<number>(0);
+  const prevCompanionActionRef = useRef<THREE.AnimationAction | null>(null);
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
@@ -193,6 +194,13 @@ export function HoodratPlayer({
     prevActionRef.current?.fadeOut(0.2);
     next.reset().fadeIn(0.2).play();
     prevActionRef.current = next;
+  }, []);
+
+  const fadeToCompanion = useCallback((next: THREE.AnimationAction | null | undefined) => {
+    if (!next) return;
+    prevCompanionActionRef.current?.fadeOut(0.2);
+    next.reset().fadeIn(0.2).play();
+    prevCompanionActionRef.current = next;
   }, []);
 
   useLayoutEffect(() => {
@@ -475,16 +483,36 @@ export function HoodratPlayer({
         act.setLoop(THREE.LoopOnce, 1);
         act.clampWhenFinished = true;
         fadeTo(act);
+        if (companionScene && clips.jump && companionActions?.[clips.jump]) {
+          const cAct = companionActions[clips.jump]!;
+          cAct.reset();
+          cAct.setLoop(THREE.LoopOnce, 1);
+          cAct.clampWhenFinished = true;
+          fadeToCompanion(cAct);
+        }
       } else if (targetLoco === 'run' && clips.run && actions?.[clips.run]) {
         const a = actions[clips.run]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.run && companionActions?.[clips.run]) {
+          const cA = companionActions[clips.run]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (targetLoco === 'walk' && clips.walk && actions?.[clips.walk]) {
         const a = actions[clips.walk]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.walk && companionActions?.[clips.walk]) {
+          const cA = companionActions[clips.walk]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (clips.idle && actions?.[clips.idle]) {
         fadeTo(actions[clips.idle]);
+        if (companionScene && clips.idle && companionActions?.[clips.idle]) {
+          fadeToCompanion(companionActions[clips.idle]);
+        }
       }
     }
 
