@@ -1,4 +1,5 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { NavActiveRatChip } from './NavActiveRatChip';
 
 export function WalletConnectButton() {
   return (
@@ -49,7 +50,8 @@ export function WalletConnectButton() {
                 );
               }
               return (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <NavActiveRatChip />
                   <button
                     type="button"
                     onClick={openChainModal}
