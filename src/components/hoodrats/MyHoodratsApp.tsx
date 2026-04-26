@@ -68,6 +68,13 @@ function MyHoodratsInner() {
               <span className="text-zinc-300">active rat</span> — that drives the header profile,
               home hero tint, cyber / UR worlds, and Tokenbound backpack views.
             </p>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">
+              As an owner you can download a <span className="text-zinc-300">free .glb</span> of each
+              Hoodrat you hold (open <span className="text-zinc-300">3D + GLB</span> on the card, then
+              use <span className="text-zinc-300">Download .glb</span>) for personal renders — reuse of
+              the base mesh still follows your collection license.{' '}
+              <span className="text-zinc-400">More traits and rig updates are on the roadmap.</span>
+            </p>
 
             {!isConnected ? (
               <p className="mt-10 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-300">
