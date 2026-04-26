@@ -54,3 +54,4 @@ This document captures how Tokenbound-style TBAs fit the app and what to build i
 
 - Tokenbound docs: [https://docs.tokenbound.org/intro](https://docs.tokenbound.org/intro)  
 - Internal mirror: `threejs/tba/eip-6551.md`, `guides/read-a-tba.mdx`, `guides/interact-with-tba.mdx`
+- **Manual testing:** [TESTING.md](./TESTING.md)

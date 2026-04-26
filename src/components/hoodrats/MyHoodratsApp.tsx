@@ -60,16 +60,18 @@ function MyHoodratsInner() {
             <h1 className="text-3xl font-black text-white md:text-4xl">
               My Hoodrats
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-              Connect the same wallet you use on the home page. Owned token IDs
-              come from <code className="text-lime-200/90">tokensOfOwner</code> on
-              the contract.
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
+              This page lists every Hoodrat your connected wallet holds on Ethereum
+              mainnet. Open a token, use <span className="text-zinc-300">3D + GLB</span> for a
+              tribe-accurate preview and export, or tap the{' '}
+              <span className="font-semibold text-lime-200/90">+</span> on a rat’s art to set your{' '}
+              <span className="text-zinc-300">active rat</span> — that drives the header profile,
+              home hero tint, cyber / UR worlds, and Tokenbound backpack views.
             </p>
 
             {!isConnected ? (
               <p className="mt-10 rounded-xl border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-300">
-                Connect your wallet with the button in the header to load your
-                rats.
+                Connect your wallet with the button in the header to see your Hoodrats here.
               </p>
             ) : isLoading ? (
               <p className="mt-10 text-sm text-zinc-500">Loading your rats…</p>
