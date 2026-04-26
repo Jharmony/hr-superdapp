@@ -8,6 +8,10 @@ export const RESERVOIR_API_BASE = 'https://api.reservoir.tools';
 export type HoodratListingRow = {
   orderId: string;
   tokenId: number;
+  tokenName?: string;
+  tokenImage?: string;
+  /** Trait map when Reservoir returns token attributes (best-effort). */
+  tokenTraits?: Record<string, string>;
   priceEth: number | null;
   priceUsd: number | null;
   sourceLabel: string;
@@ -111,6 +115,45 @@ function extractOrderId(order: Record<string, unknown>): string {
   return typeof id === 'string' && id.length > 0 ? id : 'unknown';
 }
 
+function extractTokenName(order: Record<string, unknown>): string | undefined {
+  const t = asRecord(order.token);
+  const name = t?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+}
+
+function extractTokenImage(order: Record<string, unknown>): string | undefined {
+  const t = asRecord(order.token);
+  const img = t?.image;
+  return typeof img === 'string' && img.trim() ? img.trim() : undefined;
+}
+
+function extractTokenTraits(order: Record<string, unknown>): Record<string, string> | undefined {
+  const t = asRecord(order.token);
+  const attrs = t ? (t.attributes as unknown) : undefined;
+  if (!Array.isArray(attrs) || attrs.length === 0) return undefined;
+
+  const out: Record<string, string> = {};
+  for (const a0 of attrs) {
+    const a = asRecord(a0);
+    if (!a) continue;
+    const key = a.key ?? a.trait_type ?? a.traitType;
+    const value = a.value;
+    const k = typeof key === 'string' ? key.trim() : '';
+    if (!k) continue;
+    const v =
+      typeof value === 'string'
+        ? value.trim()
+        : typeof value === 'number'
+          ? String(value)
+          : value != null
+            ? String(value)
+            : '';
+    if (!v) continue;
+    out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function parseOrder(order: unknown): HoodratListingRow | null {
   const o = asRecord(order);
   if (!o) return null;
@@ -121,6 +164,9 @@ function parseOrder(order: unknown): HoodratListingRow | null {
   return {
     orderId: extractOrderId(o),
     tokenId,
+    tokenName: extractTokenName(o),
+    tokenImage: extractTokenImage(o),
+    tokenTraits: extractTokenTraits(o),
     priceEth: eth,
     priceUsd: usd,
     sourceLabel: extractSource(o),

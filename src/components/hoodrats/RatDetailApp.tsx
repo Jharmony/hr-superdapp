@@ -12,6 +12,7 @@ import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
+import { FallbackImage } from '../media/FallbackImage';
 
 function parseIdFromSearch(): number | null {
   if (typeof window === 'undefined') return null;
@@ -173,7 +174,7 @@ function RatDetailContent({ tokenId }: { tokenId: number }) {
                   />
                 </div>
               ) : img ? (
-                <img
+                <FallbackImage
                   src={img}
                   alt={title}
                   className="w-full object-contain"

@@ -8,6 +8,7 @@ import { resolveUri } from '../../lib/uri';
 import { downloadHoodratTraitGlb } from '../../lib/exportHoodratTraitGlb';
 import { hoodratOpenSeaUrl } from '../../lib/nftMarketLinks';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
+import { FallbackImage } from '../media/FallbackImage';
 
 /** Thumbnail + links; holders can open an inline 3D preview and download a tinted `.glb`. */
 export function OwnedRatCard({ tokenId }: { tokenId: number }) {
@@ -72,7 +73,7 @@ export function OwnedRatCard({ tokenId }: { tokenId: number }) {
               {errMsg.slice(0, 48)}
             </div>
           ) : img ? (
-            <img
+            <FallbackImage
               src={img}
               alt={meta?.name ?? `HOODRAT ${tokenId}`}
               className="h-full w-full object-cover"

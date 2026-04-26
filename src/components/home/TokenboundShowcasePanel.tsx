@@ -4,6 +4,7 @@ import { HOODRATS_ADDRESS, hoodratsAbi } from '../../lib/contract';
 import { hoodratsChainId } from '../../lib/chain';
 import type { NftMetadata } from '../../lib/metadata';
 import { resolveUri } from '../../lib/uri';
+import { FallbackImage } from '../media/FallbackImage';
 
 const SHOWCASE_TOKEN_ID = Number(
   (import.meta.env.PUBLIC_TOKENBOUND_DEMO_TOKEN_ID as string | undefined)?.trim() ||
@@ -122,7 +123,7 @@ export function TokenboundShowcasePanel() {
               This token has no <code className="text-zinc-300">animation_url</code> in
               metadata yet — showing static image instead.
             </p>
-            <img
+            <FallbackImage
               src={img}
               alt={title}
               className="mx-auto max-h-[min(70vh,520px)] w-full object-contain"

@@ -6,6 +6,7 @@ import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
+import { FallbackImage } from '../media/FallbackImage';
 
 type Props = {
   tokenId: number;
@@ -68,7 +69,7 @@ export function RatPrerenderedDetailPage({
               />
             </div>
           ) : imgUrl ? (
-            <img
+            <FallbackImage
               src={imgUrl}
               alt={title}
               className="w-full object-contain"

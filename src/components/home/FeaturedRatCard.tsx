@@ -4,6 +4,7 @@ import { HOODRATS_ADDRESS, hoodratsAbi } from '../../lib/contract';
 import { hoodratsChainId } from '../../lib/chain';
 import type { NftMetadata } from '../../lib/metadata';
 import { resolveUri } from '../../lib/uri';
+import { FallbackImage } from '../media/FallbackImage';
 
 export function FeaturedRatCard({ tokenId }: { tokenId: number }) {
   const {
@@ -76,7 +77,7 @@ export function FeaturedRatCard({ tokenId }: { tokenId: number }) {
             </span>
           </div>
         ) : img ? (
-          <img
+          <FallbackImage
             src={img}
             alt={meta?.name ?? `HOODRAT ${tokenId}`}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
