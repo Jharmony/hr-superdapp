@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { createMetadataPublicClient } from '../../../lib/metadata';
+import { readTbaWalletBalances } from '../../../lib/tbaBackpackBalances';
 import { readTbaAddress } from '../../../lib/tba';
 import { fetchOpenSeaNftsForOwner } from '../../../lib/tbaOpenSeaServer';
 import { getOpenSeaApiKey } from '../../../lib/serverEnv';
@@ -24,6 +25,7 @@ export const GET: APIRoute = async ({ request }) => {
   try {
     const client = createMetadataPublicClient();
     const tbaAddress = await readTbaAddress(client, tokenId);
+    const balances = await readTbaWalletBalances(client, tbaAddress);
 
     const key = getOpenSeaApiKey();
     if (!key) {
@@ -33,6 +35,9 @@ export const GET: APIRoute = async ({ request }) => {
           nfts: [],
           truncated: false,
           inventoryUnavailableReason: 'opensea_key_required',
+          nativeWei: balances.nativeWei,
+          nativeEth: balances.nativeEth,
+          erc20: balances.erc20,
         }),
         {
           status: 200,
@@ -46,13 +51,23 @@ export const GET: APIRoute = async ({ request }) => {
 
     const { nfts, truncated } = await fetchOpenSeaNftsForOwner(key, tbaAddress, MAX_NFTS);
 
-    return new Response(JSON.stringify({ tbaAddress, nfts, truncated }), {
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'cache-control': 'public, s-maxage=120, stale-while-revalidate=600',
+    return new Response(
+      JSON.stringify({
+        tbaAddress,
+        nfts,
+        truncated,
+        nativeWei: balances.nativeWei,
+        nativeEth: balances.nativeEth,
+        erc20: balances.erc20,
+      }),
+      {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'public, s-maxage=120, stale-while-revalidate=600',
+        },
       },
-    });
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return new Response(JSON.stringify({ error: 'tba_backpack_failed', message: msg.slice(0, 400) }), {

@@ -15,6 +15,7 @@ import type { TraitAttr } from '../../lib/traitVisual';
 import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
+import { WorldTbaHud } from './WorldTbaHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
@@ -310,7 +311,7 @@ function WorldCanvas({
 }
 
 function CyberWorldExperience() {
-  const { traitAttributes } = useActiveHoodratTraitAttributes();
+  const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -330,6 +331,8 @@ function CyberWorldExperience() {
           {viewMode === 'fp' ? 'first-person' : 'third-person'}
         </p>
       </div>
+
+      <WorldTbaHud activeTokenId={activeTokenId} />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary

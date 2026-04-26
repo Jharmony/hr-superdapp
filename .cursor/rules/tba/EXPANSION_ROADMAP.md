@@ -40,10 +40,11 @@ This document captures how Tokenbound-style TBAs fit the app and what to build i
 - **UI:** My Hoodrats — `Set as active rat` on each `OwnedRatCard`, banner + link to `/world/`, **Clear active**.
 - **Worlds:** `useActiveHoodratTraitAttributes` loads `tokenURI` → JSON metadata → passes `traitAttributes` into `HoodratPlayer`, which runs `applyTraitAttributesToScene` (same path as `TraitHoodratPreview` / GLB export). Cyber + UR rift wrap with `Web3Providers` so wagmi reads work.
 
-## Phase 3 — In-world HUD
+## Phase 3 — In-world HUD ✅
 
-- Show the active rat’s TBA inventory (or a curated subset) in the world UI.
-- Optional: read-only ETH / ERC-20 balances via RPC or indexer.
+- **`WorldTbaHud`** on `/world/` and `/world/next/`: collapsible **Backpack** panel (bottom-left) — TBA address, **native ETH** + **USDC / WETH** (mainnet `balanceOf` when > 0), OpenSea NFT grid (same `/api/tba/backpack.json` + `OPENSEA_API_KEY` caveats as token page). Hint when no active rat.
+- **API:** `GET /api/tba/backpack.json` includes `nativeWei`, `nativeEth`, `erc20[]` from `readTbaWalletBalances` (`src/lib/tbaBackpackBalances.ts`).
+- **Home hero:** `HoodratHeroCanvas` uses `useActiveHoodratTraitAttributes()` — when an active owned rat exists, hero GLB uses **`applyTraitAttributesToScene`** (tribe tint); otherwise default rig.
 
 ## Phase 4 — Writes (optional, later)
 

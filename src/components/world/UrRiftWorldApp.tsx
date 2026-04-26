@@ -16,6 +16,7 @@ import {
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { HoodratPlayer } from './HoodratPlayer';
+import { WorldTbaHud } from './WorldTbaHud';
 import { circleIntersectsObstacle, type XZRect } from './collision';
 import { GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
@@ -554,7 +555,7 @@ function UrWorldCanvas({
 }
 
 function UrRiftWorldExperience() {
-  const { traitAttributes } = useActiveHoodratTraitAttributes();
+  const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -578,6 +579,8 @@ function UrRiftWorldExperience() {
           {viewMode === 'fp' ? 'first-person' : 'third-person'}
         </p>
       </div>
+
+      <WorldTbaHud activeTokenId={activeTokenId} />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary
