@@ -100,9 +100,9 @@ export function NavActiveRatChip() {
     <a
       href={`/rats/${validId}/`}
       title={`Active rat for 3D worlds — ${label}. Opens token page.`}
-      className="flex max-w-[10.5rem] items-center gap-2 rounded-lg border border-lime-500/35 bg-lime-950/30 py-1.5 pl-1 pr-2.5 transition hover:border-lime-400/50 hover:bg-lime-950/45"
+      className="flex h-9 max-w-[8.75rem] items-center gap-1.5 rounded-lg border border-lime-500/30 bg-lime-950/25 py-0.5 pl-0.5 pr-2 transition hover:border-lime-400/45 hover:bg-lime-950/40 md:max-w-[9.25rem]"
     >
-      <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md border border-zinc-700/80 bg-zinc-900">
+      <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md border border-zinc-700/70 bg-zinc-900">
         {img ? (
           <FallbackImage
             src={img}
@@ -112,16 +112,16 @@ export function NavActiveRatChip() {
             referrerPolicy="no-referrer"
           />
         ) : (
-          <span className="flex h-full w-full items-center justify-center text-[10px] font-bold text-lime-200/80">
+          <span className="flex h-full w-full items-center justify-center text-[9px] font-bold text-lime-200/85">
             #{validId}
           </span>
         )}
       </span>
-      <span className="min-w-0 flex-1 text-left">
-        <span className="block text-[9px] font-bold uppercase tracking-[0.14em] text-lime-300/90">
+      <span className="min-w-0 flex-1 text-left leading-tight">
+        <span className="block text-[7px] font-bold uppercase tracking-[0.12em] text-lime-400/95">
           Active
         </span>
-        <span className="block truncate text-[11px] font-semibold text-zinc-100">{label}</span>
+        <span className="block truncate text-[10px] font-semibold text-zinc-100">{label}</span>
       </span>
     </a>
   );

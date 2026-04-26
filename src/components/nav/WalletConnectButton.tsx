@@ -1,5 +1,5 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { NavActiveRatChip } from './NavActiveRatChip';
+import { MergedWalletMenu } from './MergedWalletMenu';
 
 export function WalletConnectButton() {
   return (
@@ -50,32 +50,12 @@ export function WalletConnectButton() {
                 );
               }
               return (
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <NavActiveRatChip />
-                  <button
-                    type="button"
-                    onClick={openChainModal}
-                    className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-medium text-zinc-300 hover:border-zinc-600"
-                  >
-                    {chain.hasIcon && chain.iconUrl ? (
-                      <span className="mr-2 inline-flex h-4 w-4 align-middle">
-                        <img
-                          alt={chain.name ?? 'chain'}
-                          src={chain.iconUrl}
-                          className="h-4 w-4 rounded-full"
-                        />
-                      </span>
-                    ) : null}
-                    {chain.name}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openAccountModal}
-                    className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-medium text-zinc-100 hover:border-lime-500/40"
-                  >
-                    {account.displayName}
-                  </button>
-                </div>
+                <MergedWalletMenu
+                  chain={chain}
+                  account={account}
+                  openAccountModal={openAccountModal}
+                  openChainModal={openChainModal}
+                />
               );
             })()}
           </div>
