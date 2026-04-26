@@ -5,6 +5,7 @@ import { SiteNav } from '../nav/SiteNav';
 import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
+import { TbaBackpackPanel } from './TbaBackpackPanel';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
 
@@ -55,6 +56,10 @@ export function RatPrerenderedDetailPage({
           >
             <TraitHoodratPreview compact attributes={attributes} />
           </div>
+        </div>
+
+        <div className="mx-auto mt-8 w-full max-w-3xl">
+          <TbaBackpackPanel tokenId={tokenId} />
         </div>
 
         <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-black shadow-2xl">
