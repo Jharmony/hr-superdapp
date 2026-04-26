@@ -27,10 +27,9 @@ function RatDetailEmpty() {
     <main className="mx-auto max-w-lg shrink-0 px-4 py-16 text-center md:py-20">
       <h1 className="text-xl font-bold text-white">View a Hoodrat</h1>
       <p className="mt-4 text-sm text-zinc-400">
-        Open a link with <code className="text-lime-200">?id=</code> and the token
-        number, for example{' '}
-        <a className="font-mono text-lime-300 underline" href="/rats/?id=1">
-          /rats/?id=1
+        Open a token page like{' '}
+        <a className="font-mono text-lime-300 underline" href="/rats/1/">
+          /rats/1/
         </a>
         .
       </p>
@@ -42,8 +41,7 @@ function RatDetailEmpty() {
         each card links here automatically.
       </p>
       <p className="mt-4 text-xs text-zinc-600">
-        Tokens in your prerender range also work as{' '}
-        <code className="text-zinc-400">/rats/1/</code> etc.
+        Legacy query links like <code className="text-zinc-400">/rats/?id=1</code> still work too.
       </p>
       <a
         href="/"

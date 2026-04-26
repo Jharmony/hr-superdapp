@@ -58,7 +58,7 @@ export function OwnedRatCard({ tokenId }: { tokenId: number }) {
       ? (metaErr instanceof Error ? metaErr.message : 'Metadata failed')
       : null;
 
-  const viewerHref = `/rats/?id=${tokenId}`;
+  const viewerHref = `/rats/${tokenId}/`;
 
   return (
     <article className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/50 transition hover:border-lime-500/40 hover:shadow-[0_0_28px_rgba(163,230,53,0.12)]">

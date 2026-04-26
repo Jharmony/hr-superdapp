@@ -28,6 +28,17 @@ const UR_TARGET_SPAN = (() => {
   return Number.isFinite(n) && n >= 50 ? n : 124;
 })();
 
+/**
+ * Uniform multiplier on the city GLB **after** `UR_TARGET_SPAN` shrink (applied before floor snap).
+ * Larger values make props / streets read bigger vs the Hoodrat (default 1.5). Cyber ignores.
+ */
+const UR_WORLD_SCALE_BOOST = (() => {
+  const raw = (import.meta.env.PUBLIC_UR_WORLD_SCALE_BOOST as string | undefined)?.trim();
+  if (raw === undefined || raw === '') return 1.5;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0.85 && n <= 1.85 ? n : 1.5;
+})();
+
 /** Hoodrat mesh scale in the rift only (cyber district unchanged). Default 0.82 reads closer to human scale. */
 const UR_HOODRAT_MODEL_SCALE = (() => {
   const raw = (import.meta.env.PUBLIC_UR_WORLD_HOODRAT_SCALE as string | undefined)?.trim();
@@ -53,6 +64,21 @@ function urFootTargetY(): number {
 }
 
 /**
+ * Added to `urFootTargetY()` for the Hoodrat only (rift). Negative moves the rat down in world
+ * space so soles meet visible asphalt when the city GLB and skinned mesh disagree. Cyber ignores.
+ */
+const UR_PLAYER_Y_OFFSET = (() => {
+  const raw = (import.meta.env.PUBLIC_UR_RIFT_PLAYER_Y_OFFSET as string | undefined)?.trim();
+  if (raw === undefined || raw === '') return -0.09;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : -0.09;
+})();
+
+function urRiftPlayerGroundY(): number {
+  return urFootTargetY() + UR_PLAYER_Y_OFFSET;
+}
+
+/**
  * Optional fine nudge after ray snap (meters). Positive moves the GLB down. Default 0 — ray snap
  * should place the street on the rat floor; use this only if you need a tiny manual tweak.
  */
@@ -75,15 +101,38 @@ const UR_STREET_SURFACE_DROP = (() => {
   return Number.isFinite(n) ? n : 0.58;
 })();
 
-/** Rift-only foot snap for the skinned mesh (cyber uses ~3.88). */
-const UR_HOODRAT_FEET_SINK = (() => {
-  const raw = (import.meta.env.PUBLIC_UR_WORLD_FEET_SINK as string | undefined)?.trim();
-  if (raw === undefined || raw === '') return 3.08;
+/**
+ * Rift-only: after ray + street drop, lowers the **city GLB** a bit further so painted walk
+ * mesh meets Hoodrat soles (external GLB vs skinned mesh mismatch). Positive = world moves down.
+ * Does not affect HOOD-420PJ. Set `PUBLIC_UR_WORLD_FEET_CLEAR_DROP=0` to disable.
+ */
+const UR_FEET_CLEAR_WORLD_DROP = (() => {
+  const raw = (import.meta.env.PUBLIC_UR_WORLD_FEET_CLEAR_DROP as string | undefined)?.trim();
+  if (raw === undefined || raw === '') return 0.44;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0.5 && n < 6 ? n : 3.08;
+  return Number.isFinite(n) ? n : 0.44;
 })();
 
-type UrBounds = { worldXZLim: number; obstacles: XZRect[] };
+/**
+ * Max inward shrink per edge on each obstacle XZ hull (m). Opens real door gaps when the GLB
+ * merged a facade into one fat AABB. Set `PUBLIC_UR_OBSTACLE_XZ_INSET_MAX=0` to disable.
+ */
+const UR_OBSTACLE_XZ_INSET_MAX = (() => {
+  const raw = (import.meta.env.PUBLIC_UR_OBSTACLE_XZ_INSET_MAX as string | undefined)?.trim();
+  if (raw === undefined || raw === '') return 0.22;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 0.6 ? n : 0.22;
+})();
+
+/** Rift-only foot snap for the skinned mesh (cyber flat floor uses `CYBER_FEET_SINK`). */
+const UR_HOODRAT_FEET_SINK = (() => {
+  const raw = (import.meta.env.PUBLIC_UR_WORLD_FEET_SINK as string | undefined)?.trim();
+  if (raw === undefined || raw === '') return 3.22;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0.5 && n < 6 ? n : 3.22;
+})();
+
+type UrBounds = { worldXZLim: number; obstacles: XZRect[]; terrainRoot: THREE.Object3D };
 
 const _tmpBox = new THREE.Box3();
 const _tmpSize = new THREE.Vector3();
@@ -155,9 +204,35 @@ function alignUrRootWalkableToFootY(root: THREE.Object3D, footY: number): void {
 }
 
 /**
+ * Shrink an obstacle rect in XZ so merged mesh AABBs leave walkable gaps at door widths.
+ */
+function shrinkUrObstacleXZ(r: XZRect, insetCap: number): XZRect | null {
+  if (insetCap <= 0) return r;
+  const w = r.maxx - r.minx;
+  const d = r.maxz - r.minz;
+  if (w < 0.04 || d < 0.04) return null;
+  const minSpan = Math.min(w, d);
+  const t = Math.min(insetCap, Math.max(0.035, minSpan * 0.058));
+  const ix = Math.min(t, w * 0.5 - 0.03);
+  const iz = Math.min(t, d * 0.5 - 0.03);
+  if (ix <= 0.005 || iz <= 0.005) return r;
+  const minx = r.minx + ix;
+  const maxx = r.maxx - ix;
+  const minz = r.minz + iz;
+  const maxz = r.maxz - iz;
+  if (maxx <= minx + 0.06 || maxz <= minz + 0.06) return null;
+  return { minx, maxx, minz, maxz };
+}
+
+/**
  * XZ collision from mesh world bounds (same sliding model as the cyber district). Skips broad
  * horizontal slabs so you can walk streets; keeps vertical mass as walls. Not full physics
  * (single ground plane at GROUND_Y; no multi-storey vertical stacking).
+ *
+ * Doorways: merged shells get XZ hulls shrunk so gaps fit the player circle; squat merged
+ * volumes that seal whole storefronts are skipped. Shallow horizontal slabs / stair decks /
+ * thin railing strips are skipped so xz hulls do not seal door openings or subway stairs —
+ * walkable height still comes from terrain raycasts on the Hoodrat.
  */
 function buildUrWorldObstacles(root: THREE.Object3D): XZRect[] {
   root.updateMatrixWorld(true);
@@ -181,6 +256,30 @@ function buildUrWorldObstacles(root: THREE.Object3D): XZRect[] {
     // Broad low chunks (merged pads) that still slip through the rules above
     if (sz.y < 5.2 && foot > 9 && Math.min(sz.x, sz.z) > 5.5) return;
 
+    const minSpan = Math.min(sz.x, sz.z);
+    const maxSpan = Math.max(sz.x, sz.z);
+    const areaXZ = sz.x * sz.z;
+    const aspectY = sz.y / Math.max(minSpan, 0.04);
+    const spanRatio = maxSpan / Math.max(minSpan, 0.04);
+
+    // Wide horizontal plates (sidewalk tiles, plaza slabs) — xz blocks door gaps; Y from terrain.
+    if (areaXZ > 80 && aspectY < 0.26 && sz.y < 2.55 && minSpan > 1.85) return;
+    // Merged low stair / ramp pads (subway mouth, wide shallow flight)
+    if (areaXZ > 38 && aspectY < 0.52 && sz.y < 2.15 && minSpan > 1.65 && maxSpan > 2.6) return;
+    // Long thin railing / fence strip (one AABB around many bars)
+    if (spanRatio > 4.8 && minSpan < 0.68 && sz.y > 0.35 && sz.y < 4.8) return;
+    // Thin vertical door / window jambs only (narrow xz + modest depth) — avoid skipping real walls.
+    if (
+      minSpan < 0.48 &&
+      maxSpan > 0.85 &&
+      maxSpan < 2.25 &&
+      sz.y > 1.25 &&
+      sz.y < 6.2 &&
+      aspectY > 1.62
+    ) {
+      return;
+    }
+
     const rect: XZRect = {
       minx: box.min.x,
       maxx: box.max.x,
@@ -192,7 +291,13 @@ function buildUrWorldObstacles(root: THREE.Object3D): XZRect[] {
       return;
     }
 
-    out.push(rect);
+    // One big merged “block” AABB (short vs wide) — blocks interior doors; real walls stay thin/tall.
+    if (area > 130 && minSpan > 3.9 && maxSpan > 6.2 && sz.y < maxSpan * 0.52) {
+      return;
+    }
+
+    const hull = shrinkUrObstacleXZ(rect, UR_OBSTACLE_XZ_INSET_MAX);
+    if (hull) out.push(hull);
   });
 
   return filterUrObstaclesForSpawn(out).slice(0, 420);
@@ -275,11 +380,13 @@ function UrEnvironment({ onSized }: { onSized: (b: UrBounds) => void }) {
     let box = new THREE.Box3().setFromObject(r);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.z, 1);
+    let spanScale = 1;
     if (maxDim > UR_TARGET_SPAN) {
-      r.scale.setScalar(UR_TARGET_SPAN / maxDim);
-      r.updateMatrixWorld(true);
-      box = new THREE.Box3().setFromObject(r);
+      spanScale = UR_TARGET_SPAN / maxDim;
     }
+    r.scale.setScalar(spanScale * UR_WORLD_SCALE_BOOST);
+    r.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(r);
 
     // Coarse snap, then ray-based alignment so street / sidewalk tops match Hoodrat feet.
     const targetFloorY = urFootTargetY();
@@ -289,6 +396,7 @@ function UrEnvironment({ onSized }: { onSized: (b: UrBounds) => void }) {
     alignUrRootWalkableToFootY(r, targetFloorY);
     r.position.y -= UR_STREET_SURFACE_DROP;
     r.position.y -= UR_EXTRA_DROP;
+    r.position.y -= UR_FEET_CLEAR_WORLD_DROP;
 
     r.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(r);
@@ -299,7 +407,7 @@ function UrEnvironment({ onSized }: { onSized: (b: UrBounds) => void }) {
     const obstacles = buildUrWorldObstacles(r);
     if (!sizedRef.current) {
       sizedRef.current = true;
-      onSizedRef.current({ worldXZLim, obstacles });
+      onSizedRef.current({ worldXZLim, obstacles, terrainRoot: r });
     }
   }, [root]);
 
@@ -381,9 +489,17 @@ function UrWorldScene({
             obstacleRects={bounds.obstacles}
             worldXZLim={bounds.worldXZLim}
             initialXZ={{ x: 0, z: 0 }}
-            groundY={urFootTargetY()}
+            groundY={urRiftPlayerGroundY()}
             modelScale={UR_HOODRAT_MODEL_SCALE}
             feetSink={UR_HOODRAT_FEET_SINK}
+            snapFeetToGround
+            footSkinEpsilon={0.022}
+            terrainGround={{
+              root: bounds.terrainRoot,
+              minY: urFootTargetY() - 24,
+              maxY: urFootTargetY() + 34,
+              soleBias: -0.02,
+            }}
             portal={null}
           />
         ) : null}

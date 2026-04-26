@@ -1,17 +1,16 @@
 import type { APIRoute } from 'astro';
-import { proxyOpenSeaTraits } from '../../../lib/openSeaMarketplaceServer';
+import { proxyOpenSeaPricingContext } from '../../../lib/openSeaExtrasServer';
 import { getOpenSeaApiKey, getOpenSeaCollectionSlug } from '../../../lib/serverEnv';
 
 export const prerender = false;
 
 export const GET: APIRoute = async () => {
-  const osKey = getOpenSeaApiKey();
-  if (!osKey) {
-    return new Response(JSON.stringify({ attributes: [] }), {
+  const key = getOpenSeaApiKey();
+  if (!key) {
+    return new Response(JSON.stringify({ bestListing: null, topOffer: null }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
   }
-
-  return proxyOpenSeaTraits(osKey, getOpenSeaCollectionSlug());
+  return proxyOpenSeaPricingContext(key, getOpenSeaCollectionSlug());
 };
