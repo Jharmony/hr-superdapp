@@ -59,6 +59,34 @@ const tmpMove = new THREE.Vector3();
 const tmpCamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _footAlignBox = new THREE.Box3();
 
+/** Stylized pack on the main rig when the active rat’s TBA holds ≥1 NFT (read from OpenSea). */
+function TbaWearableBackpackMesh() {
+  return (
+    <group position={[0.1, 1.14, -0.24]} rotation={[0.12, 0.05, -0.12]}>
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[0.44, 0.5, 0.28]} />
+        <meshStandardMaterial
+          color="#252018"
+          metalness={0.42}
+          roughness={0.58}
+          emissive="#0c2834"
+          emissiveIntensity={0.14}
+        />
+      </mesh>
+      <mesh position={[0, 0.42, 0.1]} castShadow receiveShadow>
+        <boxGeometry args={[0.36, 0.15, 0.24]} />
+        <meshStandardMaterial
+          color="#16342a"
+          metalness={0.28}
+          roughness={0.52}
+          emissive="#1a4a38"
+          emissiveIntensity={0.08}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 export type HoodratPortalConfig = {
   x: number;
   z: number;
@@ -91,6 +119,10 @@ export function HoodratPlayer({
   terrainGround,
   portal,
   traitAttributes,
+  /** First Hoodrat NFT in the active rat’s Tokenbound backpack — pet-scale companion in-world. */
+  companionTraitAttributes,
+  /** When positive, show a simple backpack mesh on the main rig (same source as `WorldTbaHud`). */
+  backpackItemCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -111,6 +143,8 @@ export function HoodratPlayer({
    * `TraitHoodratPreview` / My Hoodrats GLB export. Omit for the default untinted rig.
    */
   traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  backpackItemCount?: number;
 }) {
   const gltf = useGLTF(MODEL_URL);
   const traitDecorKey =
@@ -123,6 +157,17 @@ export function HoodratPlayer({
     return c;
   }, [gltf.scene, traitDecorKey]);
 
+  const companionDecorKey =
+    companionTraitAttributes === undefined
+      ? '__no_companion__'
+      : JSON.stringify(companionTraitAttributes);
+  const companionScene = useMemo(() => {
+    if (companionTraitAttributes === undefined) return null;
+    const c = SkeletonUtils.clone(gltf.scene);
+    applyTraitAttributesToScene(c, companionTraitAttributes);
+    return c;
+  }, [gltf.scene, companionDecorKey]);
+
   useEffect(() => {
     return () => {
       if (traitAttributes !== undefined) {
@@ -131,11 +176,24 @@ export function HoodratPlayer({
     };
   }, [traitAttributes, worldScene]);
 
+  useEffect(() => {
+    return () => {
+      if (companionTraitAttributes !== undefined && companionScene) {
+        disposeColoredHoodratScene(companionScene);
+      }
+    };
+  }, [companionTraitAttributes, companionScene]);
+
   const { actions, mixer } = useAnimations(gltf.animations, worldScene);
   const { camera, gl } = useThree();
   const [, get] = useKeyboardControls();
 
   const clips = useMemo(() => resolveClips(gltf.animations), [gltf.animations]);
+  const companionGroupRef = useRef<THREE.Group>(null);
+  const { actions: companionActions, mixer: companionMixer } = useAnimations(
+    gltf.animations,
+    companionGroupRef,
+  );
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
@@ -262,6 +320,34 @@ export function HoodratPlayer({
     }
   }, [feetSink, modelScale, snapFeetToGround, worldScene]);
 
+  useLayoutEffect(() => {
+    const g = companionGroupRef.current;
+    if (!g) return;
+    for (let i = g.children.length - 1; i >= 0; i--) {
+      g.remove(g.children[i]!);
+    }
+    if (companionScene) {
+      const c = companionScene;
+      c.scale.setScalar(1);
+      c.position.set(0, 0, 0);
+      c.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(c);
+      c.position.y = -box.min.y - feetSink;
+      g.add(c);
+    }
+  }, [companionScene, feetSink]);
+
+  useEffect(() => {
+    if (!companionScene || !companionActions || !clips.idle || !companionActions[clips.idle]) {
+      return;
+    }
+    const idle = companionActions[clips.idle]!;
+    idle.reset().fadeIn(0.18).play();
+    return () => {
+      idle.fadeOut(0.12);
+    };
+  }, [companionScene, companionActions, clips.idle]);
+
   useEffect(() => {
     if (!actions || !clips.idle || !actions[clips.idle]) return;
     fadeTo(actions[clips.idle]);
@@ -269,6 +355,7 @@ export function HoodratPlayer({
 
   useFrame((_, dt) => {
     if (mixer) mixer.update(dt);
+    if (companionMixer && companionScene) companionMixer.update(dt);
 
     const locked = pointerLockedRef.current;
     const { forward, back, left, right, run, jump } = get();
@@ -429,6 +516,27 @@ export function HoodratPlayer({
       groupRef.current.position.copy(p);
     }
 
+    const cg = companionGroupRef.current;
+    if (cg && companionScene) {
+      cg.visible = !firstPersonRef.current;
+      if (cg.visible) {
+        const ry = visualRef.current?.rotation.y ?? 0;
+        const sinY = Math.sin(ry);
+        const cosY = Math.cos(ry);
+        const fwdX = -sinY;
+        const fwdZ = -cosY;
+        const rightX = cosY;
+        const rightZ = -sinY;
+        cg.scale.setScalar(modelScale * 0.33);
+        cg.position.set(
+          p.x + rightX * 0.82 + fwdX * 0.26,
+          p.y,
+          p.z + rightZ * 0.82 + fwdZ * 0.26,
+        );
+        cg.rotation.y = ry;
+      }
+    }
+
     if (
       snapFeetToGround &&
       !footGroundSnapDoneRef.current &&
@@ -535,7 +643,11 @@ export function HoodratPlayer({
       />
       <group ref={visualRef}>
         <primitive object={worldScene} />
+        {typeof backpackItemCount === 'number' && backpackItemCount > 0 ? (
+          <TbaWearableBackpackMesh />
+        ) : null}
       </group>
+      <group ref={companionGroupRef} />
     </group>
   );
 }

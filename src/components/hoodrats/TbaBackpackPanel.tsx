@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { etherscanAddressUrl, openSeaAddressUrl } from '../../lib/nftMarketLinks';
 import { FallbackImage } from '../media/FallbackImage';
+import { TbaBackpackTransferButton } from './TbaBackpackTransferButton';
 
 type BackpackNft = {
   contract: string;
@@ -26,6 +27,7 @@ export function TbaBackpackPanel({ tokenId }: { tokenId: number }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<BackpackJson | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +48,7 @@ export function TbaBackpackPanel({ tokenId }: { tokenId: number }) {
     return () => {
       cancelled = true;
     };
-  }, [tokenId]);
+  }, [tokenId, reloadTick]);
 
   const tba = data?.tbaAddress?.trim();
 
@@ -144,39 +146,48 @@ export function TbaBackpackPanel({ tokenId }: { tokenId: number }) {
             {nfts.map((nft) => {
               const key = `${nft.contract}-${nft.tokenId}`;
               const label = nft.name?.trim() || `#${nft.tokenId}`;
-              const inner = (
-                <>
-                  <div className="relative aspect-square w-full overflow-hidden bg-zinc-900">
-                    {nft.image ? (
-                      <FallbackImage
-                        src={nft.image}
-                        alt=""
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center p-2 text-center text-[0.65rem] text-zinc-600">
-                        No image
-                      </div>
-                    )}
-                  </div>
-                  <p className="line-clamp-2 p-2 text-[0.7rem] font-medium leading-snug text-zinc-200">
-                    {label}
-                  </p>
-                </>
+              const transferBlock =
+                tba && nft.contract?.startsWith('0x') ? (
+                  <TbaBackpackTransferButton
+                    parentTokenId={tokenId}
+                    tbaAddress={tba as `0x${string}`}
+                    nftContract={nft.contract as `0x${string}`}
+                    nftTokenId={nft.tokenId}
+                    onTransferred={() => setReloadTick((n) => n + 1)}
+                  />
+                ) : null;
+              const thumb = (
+                <div className="relative aspect-square w-full overflow-hidden bg-zinc-900">
+                  {nft.image ? (
+                    <FallbackImage
+                      src={nft.image}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-2 text-center text-[0.65rem] text-zinc-600">
+                      No image
+                    </div>
+                  )}
+                </div>
+              );
+              const caption = (
+                <p className="line-clamp-2 p-2 text-[0.7rem] font-medium leading-snug text-zinc-200">
+                  {label}
+                </p>
               );
               if (nft.openseaUrl) {
                 return (
                   <li key={key}>
-                    <a
-                      href={nft.openseaUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80 transition hover:border-sky-500/35"
-                    >
-                      {inner}
-                    </a>
+                    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80 transition hover:border-sky-500/35">
+                      <a href={nft.openseaUrl} target="_blank" rel="noreferrer" className="block">
+                        {thumb}
+                        {caption}
+                      </a>
+                      <div className="border-t border-zinc-800/80 px-2 pb-2">{transferBlock}</div>
+                    </div>
                   </li>
                 );
               }
@@ -185,7 +196,9 @@ export function TbaBackpackPanel({ tokenId }: { tokenId: number }) {
                   key={key}
                   className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80"
                 >
-                  {inner}
+                  {thumb}
+                  {caption}
+                  {transferBlock}
                 </li>
               );
             })}

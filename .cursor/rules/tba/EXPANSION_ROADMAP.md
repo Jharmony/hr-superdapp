@@ -46,9 +46,11 @@ This document captures how Tokenbound-style TBAs fit the app and what to build i
 - **API:** `GET /api/tba/backpack.json` includes `nativeWei`, `nativeEth`, `erc20[]` from `readTbaWalletBalances` (`src/lib/tbaBackpackBalances.ts`).
 - **Home hero:** `HoodratHeroCanvas` uses `useActiveHoodratTraitAttributes()` — when an active owned rat exists, hero GLB uses **`applyTraitAttributesToScene`** (tribe tint); otherwise default rig.
 
-## Phase 4 — Writes (optional, later)
+## Phase 4 — TBA writes + in-world visuals (partial)
 
-- Transfer NFTs into/out of the TBA, listings, etc., via wagmi + user-signed txs; guardrails and copy around “you are moving assets from the rat’s backpack.”
+- **Transfer out (live):** On the token page backpack grid, each NFT row can show **Transfer to my wallet** when the connected wallet **owns the parent Hoodrat** (`ownerOf(parentTokenId)`). The app sends `execute` on the TBA (IERC6551Executable, `operation = 0` CALL) with calldata = `safeTransferFrom(tba, wallet, tokenId)` on the **held NFT’s contract** — same pattern as `@tokenbound/sdk`’s `executeCall`, implemented with **viem + wagmi** (no extra SDK dependency).
+- **3D worlds:** `useBackpackWorldVisuals(activeTokenId)` reads `/api/tba/backpack.json` and drives `HoodratPlayer`: **pet-scale companion** (first Hoodrat in the backpack, tribe tint from `tokenURI` metadata) walks offset beside the main rat; a **simple backpack mesh** appears on the main rig when `nfts.length > 0`. First-person view hides the companion so it does not clip the camera.
+- **Still later:** ETH / ERC-20 sends from TBA, Seaport listings, “transfer in” flows, and richer backpack geometry than the placeholder box.
 
 ## References
 

@@ -2,6 +2,7 @@ import { Environment, Html, KeyboardControls, useGLTF } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
 import type { TraitAttr } from '../../lib/traitVisual';
 import { Web3Providers } from '../web3/Web3Providers';
 import {
@@ -440,10 +441,14 @@ function UrWorldScene({
   onLockChange,
   onViewModeChange,
   traitAttributes,
+  companionTraitAttributes,
+  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  backpackNftCount?: number;
 }) {
   const [bounds, setBounds] = useState<UrBounds | null>(null);
   const onSized = useCallback((b: UrBounds) => {
@@ -489,7 +494,7 @@ function UrWorldScene({
       >
         {bounds ? (
           <HoodratPlayer
-            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}`}
+            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}-${companionTraitAttributes === undefined ? 'c0' : JSON.stringify(companionTraitAttributes)}-${backpackNftCount ?? 0}`}
             onLockChange={onLockChange}
             onViewModeChange={onViewModeChange}
             obstacleRects={bounds.obstacles}
@@ -501,6 +506,8 @@ function UrWorldScene({
             snapFeetToGround
             footSkinEpsilon={0.022}
             traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            backpackItemCount={backpackNftCount}
             terrainGround={{
               root: bounds.terrainRoot,
               minY: urFootTargetY() - 24,
@@ -519,10 +526,14 @@ function UrWorldCanvas({
   onLockChange,
   onViewModeChange,
   traitAttributes,
+  companionTraitAttributes,
+  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  backpackNftCount?: number;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -548,6 +559,8 @@ function UrWorldCanvas({
           onLockChange={onLockChange}
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          backpackNftCount={backpackNftCount}
         />
       </KeyboardControls>
     </Canvas>
@@ -556,6 +569,7 @@ function UrWorldCanvas({
 
 function UrRiftWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
+  const { companionTraitAttributes, backpackNftCount } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -599,6 +613,8 @@ function UrRiftWorldExperience() {
             onLockChange={setLocked}
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            backpackNftCount={backpackNftCount}
           />
         </AppErrorBoundary>
       </div>

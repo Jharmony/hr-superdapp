@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
 import type { TraitAttr } from '../../lib/traitVisual';
 import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
@@ -174,10 +175,14 @@ function WorldScene({
   onLockChange,
   onViewModeChange,
   traitAttributes,
+  companionTraitAttributes,
+  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  backpackNftCount?: number;
 }) {
   return (
     <>
@@ -249,6 +254,8 @@ function WorldScene({
           feetSink={0}
           snapFeetToGround
           traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          backpackItemCount={backpackNftCount}
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -275,10 +282,14 @@ function WorldCanvas({
   onLockChange,
   onViewModeChange,
   traitAttributes,
+  companionTraitAttributes,
+  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  backpackNftCount?: number;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -304,6 +315,8 @@ function WorldCanvas({
           onLockChange={onLockChange}
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          backpackNftCount={backpackNftCount}
         />
       </KeyboardControls>
     </Canvas>
@@ -312,6 +325,7 @@ function WorldCanvas({
 
 function CyberWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
+  const { companionTraitAttributes, backpackNftCount } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -351,6 +365,8 @@ function CyberWorldExperience() {
             onLockChange={setLocked}
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            backpackNftCount={backpackNftCount}
           />
         </AppErrorBoundary>
       </div>
