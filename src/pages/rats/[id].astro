@@ -7,15 +7,9 @@ import {
 } from '../../lib/metadata';
 import { resolveUri } from '../../lib/uri';
 
-export const prerender = true;
-
-export async function getStaticPaths() {
-  const n = Number(import.meta.env.PUBLIC_STATIC_RAT_COUNT || 50);
-  const safe = Math.min(Math.max(1, n), 5000);
-  return Array.from({ length: safe }, (_, i) => ({
-    params: { id: String(i + 1) },
-  }));
-}
+// NOTE: With the Vercel adapter enabled, we render this route on-demand to avoid
+// prerendering thousands of pages during build (and to keep deploys fast/reliable).
+export const prerender = false;
 
 const id = Number(Astro.params.id);
 const client = createMetadataPublicClient();

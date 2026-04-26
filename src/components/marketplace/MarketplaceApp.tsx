@@ -282,10 +282,8 @@ function MarketplaceInner() {
                 <p className="font-semibold">Could not load marketplace data</p>
                 <p className="mt-2 text-red-200/80">{err}</p>
                 <p className="mt-3 text-xs text-zinc-500">
-                  If this is a browser block (CORS) or rate limit, set{' '}
-                  <code className="text-zinc-300">PUBLIC_RESERVOIR_API_KEY</code> in{' '}
-                  <code className="text-zinc-300">.env</code> and rebuild, or try again
-                  later.
+                  Set <code className="text-zinc-300">RESERVOIR_API_KEY</code> in Vercel env vars
+                  (server-side) so the marketplace proxy can fetch data reliably.
                 </p>
               </div>
             ) : mode === 'activity' ? (

@@ -17,13 +17,8 @@ function asRecord(v: unknown): Record<string, unknown> | null {
  * We use the contract address as the collection id for single-contract collections.
  */
 export async function fetchHoodratsTraitCounts(): Promise<CollectionTraitCounts> {
-  const collection = HOODRATS_ADDRESS;
-  const url = `${RESERVOIR_API_BASE}/collections/${collection}/attributes/all/v2`;
-  const headers: HeadersInit = { accept: 'application/json' };
-  const apiKey = (import.meta.env.PUBLIC_RESERVOIR_API_KEY as string | undefined)?.trim();
-  if (apiKey) (headers as Record<string, string>)['x-api-key'] = apiKey;
-
-  const res = await fetch(url, { headers });
+  const url = new URL(`${RESERVOIR_API_BASE}/traits.json`, window.location.origin);
+  const res = await fetch(url.toString(), { headers: { accept: 'application/json' } });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     throw new Error(`Traits request failed (${res.status})${t ? `: ${t.slice(0, 160)}` : ''}`);

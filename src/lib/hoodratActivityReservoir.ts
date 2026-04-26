@@ -113,17 +113,13 @@ export async function fetchHoodratActivityPage(
   continuation: string | null,
   limit = 50,
 ): Promise<HoodratActivityPage> {
-  const url = new URL(`${RESERVOIR_API_BASE}/collections/activity/v6`);
-  url.searchParams.set('collection', HOODRATS_ADDRESS);
+  // Proxy via same-origin API to avoid browser blocks.
+  const url = new URL(`${RESERVOIR_API_BASE}/activity.json`, window.location.origin);
   url.searchParams.set('limit', String(Math.min(200, Math.max(1, limit))));
   for (const t of types) url.searchParams.append('types', t);
   if (continuation) url.searchParams.set('continuation', continuation);
 
-  const headers: HeadersInit = { accept: 'application/json' };
-  const apiKey = (import.meta.env.PUBLIC_RESERVOIR_API_KEY as string | undefined)?.trim();
-  if (apiKey) (headers as Record<string, string>)['x-api-key'] = apiKey;
-
-  const res = await fetch(url.toString(), { headers });
+  const res = await fetch(url.toString(), { headers: { accept: 'application/json' } });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     throw new Error(

@@ -51,12 +51,8 @@ export function FeaturedRatCard({ tokenId }: { tokenId: number }) {
       ? (metaErr instanceof Error ? metaErr.message : 'Could not load metadata')
       : null;
 
-  /** Prefer static `/rats/n/` when that HTML was prerendered (faster, SEO). */
-  const prerenderMax = Number(import.meta.env.PUBLIC_STATIC_RAT_COUNT ?? 50);
-  const detailHref =
-    tokenId > 0 && tokenId <= prerenderMax
-      ? `/rats/${tokenId}/`
-      : `/rats/?id=${tokenId}`;
+  /** Prefer `/rats/n/` (now server-rendered on-demand on Vercel). */
+  const detailHref = tokenId > 0 ? `/rats/${tokenId}/` : `/rats/?id=${tokenId}`;
 
   return (
     <a

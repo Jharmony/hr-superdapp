@@ -3,7 +3,10 @@ import { HOODRATS_ADDRESS } from './contract';
 const CONTRACT = HOODRATS_ADDRESS.toLowerCase();
 
 /** Mainnet Reservoir HTTP API (aggregates OpenSea + other sources). */
-export const RESERVOIR_API_BASE = 'https://api.reservoir.tools';
+export const RESERVOIR_API_BASE =
+  // Use same-origin proxy (works with static + browser restrictions)
+  // and keep `RESERVOIR_API_KEY` secret on the server.
+  '/api/reservoir';
 
 export type HoodratListingRow = {
   orderId: string;
@@ -187,20 +190,11 @@ export async function fetchHoodratListingsPage(
   continuation: string | null,
   limit = 50,
 ): Promise<HoodratListingsPage> {
-  const url = new URL(`${RESERVOIR_API_BASE}/orders/asks/v5`);
-  url.searchParams.set('contracts', HOODRATS_ADDRESS);
-  url.searchParams.set('status', 'active');
-  url.searchParams.set('limit', String(Math.min(1000, Math.max(1, limit))));
-  url.searchParams.set('sortBy', 'price');
-  url.searchParams.set('sortDirection', 'asc');
-  url.searchParams.set('includeCriteriaMetadata', 'true');
+  const url = new URL(`${RESERVOIR_API_BASE}/asks.json`, window.location.origin);
+  url.searchParams.set('limit', String(Math.min(200, Math.max(1, limit))));
   if (continuation) url.searchParams.set('continuation', continuation);
 
-  const headers: HeadersInit = { accept: 'application/json' };
-  const apiKey = (import.meta.env.PUBLIC_RESERVOIR_API_KEY as string | undefined)?.trim();
-  if (apiKey) (headers as Record<string, string>)['x-api-key'] = apiKey;
-
-  const res = await fetch(url.toString(), { headers });
+  const res = await fetch(url.toString(), { headers: { accept: 'application/json' } });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     throw new Error(
