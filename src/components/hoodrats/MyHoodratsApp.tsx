@@ -61,19 +61,12 @@ function MyHoodratsInner() {
               My Hoodrats
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-              This page lists every Hoodrat your connected wallet holds on Ethereum
-              mainnet. Open a token, use <span className="text-zinc-300">3D + GLB</span> for a
-              tribe-accurate preview and export, or tap the{' '}
-              <span className="font-semibold text-lime-200/90">+</span> on a rat’s art to set your{' '}
-              <span className="text-zinc-300">active rat</span> — that drives the header profile,
-              home hero tint, cyber / UR worlds, and Tokenbound backpack views.
-            </p>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">
-              As an owner you can download a <span className="text-zinc-300">free .glb</span> of each
-              Hoodrat you hold (open <span className="text-zinc-300">3D + GLB</span> on the card, then
-              use <span className="text-zinc-300">Download .glb</span>) for personal renders — reuse of
-              the base mesh still follows your collection license.{' '}
-              <span className="text-zinc-400">More traits and rig updates are on the roadmap.</span>
+              Hoodrats your wallet holds on Ethereum mainnet. Open{' '}
+              <span className="text-zinc-300">3D + GLB</span> on a card for a tribe-accurate preview
+              and a <span className="text-zinc-300">free .glb</span> download. Tap the{' '}
+              <span className="font-semibold text-lime-200/90">+</span> on art to set your{' '}
+              <span className="text-zinc-300">active rat</span> for profile tint and worlds. More
+              traits and rig updates are coming.
             </p>
 
             {!isConnected ? (
