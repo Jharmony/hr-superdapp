@@ -5,7 +5,7 @@ import { SiteNav } from '../nav/SiteNav';
 import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
-import { TbaBackpackPanel } from './TbaBackpackPanel';
+import { TbaBackpackDrawer } from './TbaBackpackDrawer';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
 
@@ -51,15 +51,15 @@ export function RatPrerenderedDetailPage({
             </div>
           </div>
           <div
-            className="relative mx-auto aspect-[9/16] w-full max-w-[200px] shrink-0 self-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-lg sm:max-w-[228px] lg:mx-0 lg:max-w-[248px] touch-none lg:self-auto"
+            className="relative mx-auto aspect-[9/16] w-full max-w-[200px] shrink-0 self-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60 shadow-lg sm:max-w-[228px] lg:mx-0 lg:max-w-[248px] lg:self-auto"
             aria-label="3D preview"
           >
-            <TraitHoodratPreview compact attributes={attributes} />
+            <TbaBackpackDrawer tokenId={tokenId}>
+              <div className="h-full w-full touch-none">
+                <TraitHoodratPreview compact attributes={attributes} />
+              </div>
+            </TbaBackpackDrawer>
           </div>
-        </div>
-
-        <div className="mx-auto mt-8 w-full max-w-3xl">
-          <TbaBackpackPanel tokenId={tokenId} />
         </div>
 
         <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-black shadow-2xl">

@@ -30,7 +30,7 @@ This document captures how Tokenbound-style TBAs fit the app and what to build i
 
 3. **API route:** e.g. `GET /api/tba/backpack.json?tokenId=…` returns JSON: `tbaAddress`, `nfts[]` (slim rows: contract, tokenId, name, image, openseaUrl), `truncated`, optional error fields. Keeps secrets server-side.
 
-4. **UI:** A `TbaBackpackPanel` client component on `RatPrerenderedDetailPage`: loading / error states, Etherscan + OpenSea links for the TBA address, grid of thumbnails with links to OpenSea items.
+4. **UI:** `TbaBackpackDrawer` on `RatPrerenderedDetailPage`: backpack icon overlay on the GLB preview opens a slide-over panel with the same content (lazy fetch on first open).
 
 **Non-goals for phase 1:** No wallet writes, no “equip to world”, no creation of the TBA on-chain (first receive still deploys lazily on first interaction).
 
