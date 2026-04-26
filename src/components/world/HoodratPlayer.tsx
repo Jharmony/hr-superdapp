@@ -59,34 +59,6 @@ const tmpMove = new THREE.Vector3();
 const tmpCamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _footAlignBox = new THREE.Box3();
 
-/** Stylized pack on the main rig when the active rat’s TBA holds ≥1 NFT (read from OpenSea). */
-function TbaWearableBackpackMesh() {
-  return (
-    <group position={[0.1, 1.14, -0.24]} rotation={[0.12, 0.05, -0.12]}>
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[0.44, 0.5, 0.28]} />
-        <meshStandardMaterial
-          color="#252018"
-          metalness={0.42}
-          roughness={0.58}
-          emissive="#0c2834"
-          emissiveIntensity={0.14}
-        />
-      </mesh>
-      <mesh position={[0, 0.42, 0.1]} castShadow receiveShadow>
-        <boxGeometry args={[0.36, 0.15, 0.24]} />
-        <meshStandardMaterial
-          color="#16342a"
-          metalness={0.28}
-          roughness={0.52}
-          emissive="#1a4a38"
-          emissiveIntensity={0.08}
-        />
-      </mesh>
-    </group>
-  );
-}
-
 export type HoodratPortalConfig = {
   x: number;
   z: number;
@@ -121,8 +93,6 @@ export function HoodratPlayer({
   traitAttributes,
   /** First Hoodrat NFT in the active rat’s Tokenbound backpack — pet-scale companion in-world. */
   companionTraitAttributes,
-  /** When positive, show a simple backpack mesh on the main rig (same source as `WorldTbaHud`). */
-  backpackItemCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -144,7 +114,6 @@ export function HoodratPlayer({
    */
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
-  backpackItemCount?: number;
 }) {
   const gltf = useGLTF(MODEL_URL);
   const traitDecorKey =
@@ -643,9 +612,6 @@ export function HoodratPlayer({
       />
       <group ref={visualRef}>
         <primitive object={worldScene} />
-        {typeof backpackItemCount === 'number' && backpackItemCount > 0 ? (
-          <TbaWearableBackpackMesh />
-        ) : null}
       </group>
       <group ref={companionGroupRef} />
     </group>

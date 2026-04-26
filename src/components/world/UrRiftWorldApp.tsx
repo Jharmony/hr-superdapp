@@ -442,13 +442,11 @@ function UrWorldScene({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
-  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
-  backpackNftCount?: number;
 }) {
   const [bounds, setBounds] = useState<UrBounds | null>(null);
   const onSized = useCallback((b: UrBounds) => {
@@ -494,7 +492,7 @@ function UrWorldScene({
       >
         {bounds ? (
           <HoodratPlayer
-            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}-${companionTraitAttributes === undefined ? 'c0' : JSON.stringify(companionTraitAttributes)}-${backpackNftCount ?? 0}`}
+            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}-${companionTraitAttributes === undefined ? 'c0' : JSON.stringify(companionTraitAttributes)}`}
             onLockChange={onLockChange}
             onViewModeChange={onViewModeChange}
             obstacleRects={bounds.obstacles}
@@ -507,7 +505,6 @@ function UrWorldScene({
             footSkinEpsilon={0.022}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
-            backpackItemCount={backpackNftCount}
             terrainGround={{
               root: bounds.terrainRoot,
               minY: urFootTargetY() - 24,
@@ -527,13 +524,11 @@ function UrWorldCanvas({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
-  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
-  backpackNftCount?: number;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -560,7 +555,6 @@ function UrWorldCanvas({
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
-          backpackNftCount={backpackNftCount}
         />
       </KeyboardControls>
     </Canvas>
@@ -569,7 +563,7 @@ function UrWorldCanvas({
 
 function UrRiftWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
-  const { companionTraitAttributes, backpackNftCount } = useBackpackWorldVisuals(activeTokenId);
+  const { companionTraitAttributes } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -614,7 +608,6 @@ function UrRiftWorldExperience() {
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
-            backpackNftCount={backpackNftCount}
           />
         </AppErrorBoundary>
       </div>

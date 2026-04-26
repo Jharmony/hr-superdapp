@@ -176,13 +176,11 @@ function WorldScene({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
-  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
-  backpackNftCount?: number;
 }) {
   return (
     <>
@@ -255,7 +253,6 @@ function WorldScene({
           snapFeetToGround
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
-          backpackItemCount={backpackNftCount}
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -283,13 +280,11 @@ function WorldCanvas({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
-  backpackNftCount,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
-  backpackNftCount?: number;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -316,7 +311,6 @@ function WorldCanvas({
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
-          backpackNftCount={backpackNftCount}
         />
       </KeyboardControls>
     </Canvas>
@@ -325,7 +319,7 @@ function WorldCanvas({
 
 function CyberWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
-  const { companionTraitAttributes, backpackNftCount } = useBackpackWorldVisuals(activeTokenId);
+  const { companionTraitAttributes } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -366,7 +360,6 @@ function CyberWorldExperience() {
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
-            backpackNftCount={backpackNftCount}
           />
         </AppErrorBoundary>
       </div>
