@@ -10,6 +10,9 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { AppErrorBoundary } from '../AppErrorBoundary';
+import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import type { TraitAttr } from '../../lib/traitVisual';
+import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
@@ -169,9 +172,11 @@ function NeonFloor() {
 function WorldScene({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
 }) {
   return (
     <>
@@ -242,6 +247,7 @@ function WorldScene({
           initialCamYaw={0}
           feetSink={0}
           snapFeetToGround
+          traitAttributes={traitAttributes}
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -267,9 +273,11 @@ const cyberInitialCameraPosition: [number, number, number] = [
 function WorldCanvas({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -291,39 +299,20 @@ function WorldCanvas({
       }}
     >
       <KeyboardControls map={keyMap}>
-        <WorldScene onLockChange={onLockChange} onViewModeChange={onViewModeChange} />
+        <WorldScene
+          onLockChange={onLockChange}
+          onViewModeChange={onViewModeChange}
+          traitAttributes={traitAttributes}
+        />
       </KeyboardControls>
     </Canvas>
   );
 }
 
-export function CyberWorldApp() {
+function CyberWorldExperience() {
+  const { traitAttributes } = useActiveHoodratTraitAttributes();
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduceMotion(mq.matches);
-    const fn = () => setReduceMotion(mq.matches);
-    mq.addEventListener('change', fn);
-    return () => mq.removeEventListener('change', fn);
-  }, []);
-
-  if (reduceMotion) {
-    return (
-      <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-950 px-6 text-center">
-        <p className="max-w-md text-sm text-zinc-400">
-          The cyber district uses pointer-lock 3D motion. Turn off reduced motion in
-          your system settings to enter, or{' '}
-          <a className="text-lime-300 underline" href="/">
-            return home
-          </a>
-          .
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
@@ -355,7 +344,11 @@ export function CyberWorldApp() {
             </p>
           }
         >
-          <WorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+          <WorldCanvas
+            onLockChange={setLocked}
+            onViewModeChange={setViewMode}
+            traitAttributes={traitAttributes}
+          />
         </AppErrorBoundary>
       </div>
 
@@ -372,5 +365,38 @@ export function CyberWorldApp() {
         </p>
       </div>
     </div>
+  );
+}
+
+export function CyberWorldApp() {
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduceMotion(mq.matches);
+    const fn = () => setReduceMotion(mq.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+
+  if (reduceMotion) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-950 px-6 text-center">
+        <p className="max-w-md text-sm text-zinc-400">
+          The cyber district uses pointer-lock 3D motion. Turn off reduced motion in
+          your system settings to enter, or{' '}
+          <a className="text-lime-300 underline" href="/">
+            return home
+          </a>
+          .
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <Web3Providers>
+      <CyberWorldExperience />
+    </Web3Providers>
   );
 }

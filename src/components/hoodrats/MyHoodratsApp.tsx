@@ -1,15 +1,22 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAccount, useReadContract } from 'wagmi';
 import { Web3Providers } from '../web3/Web3Providers';
 import { SiteNav } from '../nav/SiteNav';
 import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
+import {
+  clearActiveHoodratTokenId,
+  readActiveHoodratTokenId,
+  writeActiveHoodratTokenId,
+} from '../../lib/activeHoodratStorage';
 import { HOODRATS_ADDRESS, hoodratsAbi } from '../../lib/contract';
 import { hoodratsChainId } from '../../lib/chain';
 import { OwnedRatCard } from './OwnedRatCard';
 
 function MyHoodratsInner() {
   const { address, isConnected } = useAccount();
+  const wallet = address?.toLowerCase();
+  const [pickTick, setPickTick] = useState(0);
 
   const { data: tokenIds, isLoading } = useReadContract({
     chainId: hoodratsChainId,
@@ -26,6 +33,23 @@ function MyHoodratsInner() {
     if (!tokenIds || !Array.isArray(tokenIds)) return [];
     return [...tokenIds].map((b) => Number(b)).sort((a, b) => a - b);
   }, [tokenIds]);
+
+  const storedActive = wallet ? readActiveHoodratTokenId(wallet) : null;
+
+  useEffect(() => {
+    if (!wallet || storedActive == null || ids.length === 0) return;
+    if (!ids.includes(storedActive)) {
+      clearActiveHoodratTokenId(wallet);
+      setPickTick((t) => t + 1);
+    }
+  }, [wallet, storedActive, ids]);
+
+  const activeId = useMemo(() => {
+    void pickTick;
+    if (!wallet) return null;
+    const s = readActiveHoodratTokenId(wallet);
+    return s != null && ids.includes(s) ? s : null;
+  }, [wallet, ids, pickTick]);
 
   return (
     <>
@@ -54,13 +78,58 @@ function MyHoodratsInner() {
                 No Hoodrats found for this wallet on mainnet.
               </p>
             ) : (
-              <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {ids.map((id) => (
-                  <li key={id}>
-                    <OwnedRatCard tokenId={id} />
-                  </li>
-                ))}
-              </ul>
+              <>
+                {activeId != null ? (
+                  <div className="mt-8 rounded-2xl border border-lime-500/35 bg-lime-950/20 px-5 py-4">
+                    <p className="text-sm text-zinc-200">
+                      <span className="font-semibold text-lime-200">Active rat for 3D worlds:</span>{' '}
+                      #{activeId} — same tribe tint as My Hoodrats preview / GLB export.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <a
+                        href="/world/"
+                        className="inline-flex rounded-lg bg-lime-400 px-4 py-2 text-xs font-black uppercase tracking-wide text-zinc-950 shadow-[0_0_18px_rgba(163,230,53,0.25)] transition hover:bg-lime-300"
+                      >
+                        Enter cyber district
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (wallet) clearActiveHoodratTokenId(wallet);
+                          setPickTick((t) => t + 1);
+                        }}
+                        className="inline-flex rounded-lg border border-zinc-600 px-4 py-2 text-xs font-semibold text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900/80"
+                      >
+                        Clear active
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-8 max-w-2xl rounded-xl border border-zinc-800/90 bg-zinc-900/30 px-4 py-3 text-xs leading-relaxed text-zinc-500">
+                    Choose <span className="font-medium text-zinc-400">Set as active rat</span> on a
+                    token below so the cyber / UR worlds load your tribe skin tint from on-chain
+                    metadata (connect the wallet that holds the rat).
+                  </p>
+                )}
+                <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {ids.map((id) => (
+                    <li key={id}>
+                      <OwnedRatCard
+                        tokenId={id}
+                        isActive={activeId === id}
+                        onSetActive={
+                          wallet
+                            ? () => {
+                                writeActiveHoodratTokenId(wallet, id);
+                                setPickTick((t) => t + 1);
+                              }
+                            : undefined
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </main>
           <div className="mt-auto w-full shrink-0">

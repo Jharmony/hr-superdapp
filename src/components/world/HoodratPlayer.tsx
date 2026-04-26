@@ -3,6 +3,11 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import {
+  applyTraitAttributesToScene,
+  disposeColoredHoodratScene,
+} from '../../lib/hoodratTraitApplyThree';
+import type { TraitAttr } from '../../lib/traitVisual';
 import { resolvePlayerXZ, type XZRect } from './collision';
 import { sampleWalkableTerrainY } from './urTerrainGround';
 import {
@@ -85,6 +90,7 @@ export function HoodratPlayer({
    */
   terrainGround,
   portal,
+  traitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -100,9 +106,31 @@ export function HoodratPlayer({
   footSkinEpsilon?: number;
   terrainGround?: { root: THREE.Object3D; minY: number; maxY: number; soleBias?: number };
   portal: HoodratPortalConfig | null;
+  /**
+   * When set (including `[]`), applies the same tribe / skin tint and clothing visibility as
+   * `TraitHoodratPreview` / My Hoodrats GLB export. Omit for the default untinted rig.
+   */
+  traitAttributes?: TraitAttr[];
 }) {
   const gltf = useGLTF(MODEL_URL);
-  const worldScene = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
+  const traitDecorKey =
+    traitAttributes === undefined ? '__default__' : JSON.stringify(traitAttributes);
+  const worldScene = useMemo(() => {
+    const c = SkeletonUtils.clone(gltf.scene);
+    if (traitAttributes !== undefined) {
+      applyTraitAttributesToScene(c, traitAttributes);
+    }
+    return c;
+  }, [gltf.scene, traitDecorKey]);
+
+  useEffect(() => {
+    return () => {
+      if (traitAttributes !== undefined) {
+        disposeColoredHoodratScene(worldScene);
+      }
+    };
+  }, [traitAttributes, worldScene]);
+
   const { actions, mixer } = useAnimations(gltf.animations, worldScene);
   const { camera, gl } = useThree();
   const [, get] = useKeyboardControls();

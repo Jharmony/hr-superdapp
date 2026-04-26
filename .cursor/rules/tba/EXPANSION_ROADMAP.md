@@ -30,14 +30,15 @@ This document captures how Tokenbound-style TBAs fit the app and what to build i
 
 3. **API route:** e.g. `GET /api/tba/backpack.json?tokenId=…` returns JSON: `tbaAddress`, `nfts[]` (slim rows: contract, tokenId, name, image, openseaUrl), `truncated`, optional error fields. Keeps secrets server-side.
 
-4. **UI:** `TbaBackpackDrawer` on `RatPrerenderedDetailPage`: backpack icon overlay on the GLB preview opens a slide-over panel with the same content (lazy fetch on first open).
+4. **UI:** A `TbaBackpackPanel` client component on `RatPrerenderedDetailPage`: loading / error states, Etherscan + OpenSea links for the TBA address, grid of thumbnails with links to OpenSea items.
 
 **Non-goals for phase 1:** No wallet writes, no “equip to world”, no creation of the TBA on-chain (first receive still deploys lazily on first interaction).
 
-## Phase 2 — “My Hoodrats” active rat
+## Phase 2 — “My Hoodrats” active rat ✅
 
-- Persist **which Hoodrat** the connected wallet treats as active (localStorage or profile API).
-- Deep link or sync that choice into the 3D world entry flow.
+- **Storage:** `src/lib/activeHoodratStorage.ts` — per-wallet (`0x…` lower) active token id in `localStorage` key `superdapp:activeHoodrat:v1`; cleared if that id is no longer in `tokensOfOwner`.
+- **UI:** My Hoodrats — `Set as active rat` on each `OwnedRatCard`, banner + link to `/world/`, **Clear active**.
+- **Worlds:** `useActiveHoodratTraitAttributes` loads `tokenURI` → JSON metadata → passes `traitAttributes` into `HoodratPlayer`, which runs `applyTraitAttributesToScene` (same path as `TraitHoodratPreview` / GLB export). Cyber + UR rift wrap with `Web3Providers` so wagmi reads work.
 
 ## Phase 3 — In-world HUD
 

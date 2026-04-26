@@ -11,7 +11,16 @@ import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
 
 /** Thumbnail + links; holders can open an inline 3D preview and download a tinted `.glb`. */
-export function OwnedRatCard({ tokenId }: { tokenId: number }) {
+export function OwnedRatCard({
+  tokenId,
+  isActive = false,
+  onSetActive,
+}: {
+  tokenId: number;
+  /** Shown when this token is the wallet’s active rat for `/world/` 3D. */
+  isActive?: boolean;
+  onSetActive?: () => void;
+}) {
   const [studioOpen, setStudioOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportErr, setExportErr] = useState<string | null>(null);
@@ -125,6 +134,22 @@ export function OwnedRatCard({ tokenId }: { tokenId: number }) {
             >
               {studioOpen ? 'Hide 3D' : '3D + GLB'}
             </button>
+            {onSetActive ? (
+              isActive ? (
+                <span className="inline-flex items-center rounded-lg border border-lime-400/40 bg-lime-950/35 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-lime-200">
+                  Active in worlds
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={Boolean(errMsg) || loading}
+                  onClick={onSetActive}
+                  className="inline-flex rounded-lg border border-zinc-600 bg-zinc-800/60 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:border-cyan-500/40 hover:bg-zinc-800 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Set as active rat
+                </button>
+              )
+            ) : null}
           </div>
         </div>
       </div>

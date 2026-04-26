@@ -1,6 +1,9 @@
 import { Environment, Html, KeyboardControls, useGLTF } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { AppErrorBoundary } from '../AppErrorBoundary';
+import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import type { TraitAttr } from '../../lib/traitVisual';
+import { Web3Providers } from '../web3/Web3Providers';
 import {
   Suspense,
   useCallback,
@@ -435,9 +438,11 @@ function UrEnvironment({ onSized }: { onSized: (b: UrBounds) => void }) {
 function UrWorldScene({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
 }) {
   const [bounds, setBounds] = useState<UrBounds | null>(null);
   const onSized = useCallback((b: UrBounds) => {
@@ -483,7 +488,7 @@ function UrWorldScene({
       >
         {bounds ? (
           <HoodratPlayer
-            key={`${bounds.worldXZLim}-${bounds.obstacles.length}`}
+            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}`}
             onLockChange={onLockChange}
             onViewModeChange={onViewModeChange}
             obstacleRects={bounds.obstacles}
@@ -494,6 +499,7 @@ function UrWorldScene({
             feetSink={UR_HOODRAT_FEET_SINK}
             snapFeetToGround
             footSkinEpsilon={0.022}
+            traitAttributes={traitAttributes}
             terrainGround={{
               root: bounds.terrainRoot,
               minY: urFootTargetY() - 24,
@@ -511,9 +517,11 @@ function UrWorldScene({
 function UrWorldCanvas({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -535,39 +543,20 @@ function UrWorldCanvas({
       }}
     >
       <KeyboardControls map={keyMap}>
-        <UrWorldScene onLockChange={onLockChange} onViewModeChange={onViewModeChange} />
+        <UrWorldScene
+          onLockChange={onLockChange}
+          onViewModeChange={onViewModeChange}
+          traitAttributes={traitAttributes}
+        />
       </KeyboardControls>
     </Canvas>
   );
 }
 
-export function UrRiftWorldApp() {
+function UrRiftWorldExperience() {
+  const { traitAttributes } = useActiveHoodratTraitAttributes();
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduceMotion(mq.matches);
-    const fn = () => setReduceMotion(mq.matches);
-    mq.addEventListener('change', fn);
-    return () => mq.removeEventListener('change', fn);
-  }, []);
-
-  if (reduceMotion) {
-    return (
-      <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-950 px-6 text-center">
-        <p className="max-w-md text-sm text-zinc-400">
-          This rift world uses pointer-lock 3D motion. Turn off reduced motion in your system settings
-          to enter, or{' '}
-          <a className="text-lime-300 underline" href="/world/">
-            return to the cyber district
-          </a>
-          .
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
@@ -603,7 +592,11 @@ export function UrRiftWorldApp() {
             </p>
           }
         >
-          <UrWorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
+          <UrWorldCanvas
+            onLockChange={setLocked}
+            onViewModeChange={setViewMode}
+            traitAttributes={traitAttributes}
+          />
         </AppErrorBoundary>
       </div>
 
@@ -618,5 +611,38 @@ export function UrRiftWorldApp() {
         </p>
       </div>
     </div>
+  );
+}
+
+export function UrRiftWorldApp() {
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduceMotion(mq.matches);
+    const fn = () => setReduceMotion(mq.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+
+  if (reduceMotion) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-950 px-6 text-center">
+        <p className="max-w-md text-sm text-zinc-400">
+          This rift world uses pointer-lock 3D motion. Turn off reduced motion in your system settings
+          to enter, or{' '}
+          <a className="text-lime-300 underline" href="/world/">
+            return to the cyber district
+          </a>
+          .
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <Web3Providers>
+      <UrRiftWorldExperience />
+    </Web3Providers>
   );
 }
