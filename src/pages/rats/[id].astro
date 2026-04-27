@@ -14,7 +14,7 @@ export const prerender = false;
 const id = Number(Astro.params.id);
 const client = createMetadataPublicClient();
 const meta = await fetchTokenMetadata(client, id);
-const anim = meta?.animation_url?.trim();
+const anim = meta?.animation_url ? resolveUri(meta.animation_url) : undefined;
 const img = meta?.image ? resolveUri(meta.image) : undefined;
 const title = meta?.name ?? `HOODRAT #${id}`;
 ---

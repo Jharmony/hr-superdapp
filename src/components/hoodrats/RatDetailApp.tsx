@@ -109,7 +109,7 @@ function RatDetailContent({ tokenId }: { tokenId: number }) {
 
   const loading = uriLoading || metaLoading;
   const title = meta?.name ?? `HOODRAT #${tokenId}`;
-  const anim = meta?.animation_url?.trim();
+  const anim = meta?.animation_url ? resolveUri(meta.animation_url) : undefined;
   const img = meta?.image ? resolveUri(meta.image) : undefined;
 
   const errMsg = uriError

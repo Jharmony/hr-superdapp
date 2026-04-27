@@ -1,8 +1,14 @@
-import { useAnimations, useGLTF, useKeyboardControls } from '@react-three/drei';
+import { Billboard, Html, useAnimations, useGLTF, useKeyboardControls } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import {
+  applyTraitAttributesToScene,
+  disposeColoredHoodratScene,
+} from '../../lib/hoodratTraitApplyThree';
+import { deriveTraitVisuals, findTraitValue, type TraitAttr } from '../../lib/traitVisual';
+import { preferTurboGatewayUrl } from '../../lib/arweaveGateways';
 import { resolvePlayerXZ, type XZRect } from './collision';
 import { sampleWalkableTerrainY } from './urTerrainGround';
 import {
@@ -26,10 +32,68 @@ import {
 } from './worldConstants';
 
 const MODEL_URL =
-  (import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() ||
+  preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
+/** Local offset under `visualRef` (rat’s body space): beside the right foot, on the floor plane. */
+const COMPANION_LOCAL_X = 0.96;
+const COMPANION_LOCAL_Y = -0.88;
+const COMPANION_LOCAL_Z = -0.02;
+
+/** UR rift only: `terrainGround` is set; lift pet in body space so knees/feet read on the street. Cyber omits `terrainGround` — unchanged. */
+const UR_RIFT_COMPANION_LOCAL_Y_LIFT = 0.26;
+
+/** Initial main-tag Y before bbox measure (fallback). */
+const DEFAULT_PLAYER_TRIBE_TAG_Y = 2.45;
+/** Extra lift above the pet bbox top so it clears the hood/head clearly. */
+const COMPANION_TRIBE_TAG_Y_PAD = 2.7;
+
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
+
+function TribeNameBillboard({
+  text,
+  accentHex,
+  y,
+  variant = 'player',
+}: {
+  text: string;
+  accentHex: string | null;
+  y: number;
+  /** Pet uses smaller type + lower `distanceFactor` so the tag matches its scale. */
+  variant?: 'player' | 'companion';
+}) {
+  const border =
+    accentHex && /^#[0-9a-f]{3,8}$/i.test(accentHex) ? accentHex : 'rgba(244,244,245,0.35)';
+  const isPet = variant === 'companion';
+  const distanceFactor = isPet ? 4.5 : 11;
+  const divClass = isPet
+    ? 'whitespace-nowrap rounded border px-2 py-0.5 text-[14px] font-bold uppercase tracking-wide shadow-md backdrop-blur-sm'
+    : 'whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide shadow-lg backdrop-blur-sm';
+  const glow = isPet ? 4 : 14;
+  return (
+    <Billboard follow position={[0, y, 0]}>
+      <Html
+        center
+        distanceFactor={distanceFactor}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+        zIndexRange={[200, 0]}
+      >
+        <div
+          className={divClass}
+          style={{
+            borderColor: border,
+            background: 'rgba(10,8,12,0.82)',
+            color: '#f4f4f5',
+            boxShadow: accentHex ? `0 0 ${glow}px ${accentHex}` : undefined,
+            textShadow: '0 1px 2px rgba(0,0,0,0.9)',
+          }}
+        >
+          {text}
+        </div>
+      </Html>
+    </Billboard>
+  );
+}
 
 type ResolvedClips = {
   idle: string | undefined;
@@ -38,10 +102,17 @@ type ResolvedClips = {
   jump: string | undefined;
 };
 
+function isBindPoseClipName(name: string): boolean {
+  return /\b(tpose|tp\s*pose|t-pose|bind\s*pose|a\s*pose|reference)\b/i.test(name);
+}
+
 function resolveClips(animations: THREE.AnimationClip[]): ResolvedClips {
   const match = (re: RegExp) => animations.find((c) => re.test(c.name))?.name;
+  const firstNonBindClipName = () =>
+    animations.find((c) => !isBindPoseClipName(c.name))?.name ?? animations[0]?.name;
   return {
-    idle: match(/\b(idle|stand|breath|tpose)\b/i) ?? animations[0]?.name,
+    // Never treat T-pose / bind clips as locomotion “idle” — that locks the rig in T-pose.
+    idle: match(/\b(idle|stand|breath)\b/i) ?? firstNonBindClipName(),
     walk: match(/\bwalk(ing)?\b/i),
     run: match(/\brun(ning)?\b/i),
     jump: match(/\bjump(ing)?\b/i),
@@ -53,6 +124,9 @@ const tmpRight = new THREE.Vector3();
 const tmpMove = new THREE.Vector3();
 const tmpCamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _footAlignBox = new THREE.Box3();
+const _tagBox = new THREE.Box3();
+const _tagInv = new THREE.Matrix4();
+const _tagVec = new THREE.Vector3();
 
 export type HoodratPortalConfig = {
   x: number;
@@ -85,6 +159,11 @@ export function HoodratPlayer({
    */
   terrainGround,
   portal,
+  traitAttributes,
+  /** First Hoodrat NFT in the active rat’s Tokenbound backpack — pet-scale companion in-world. */
+  companionTraitAttributes,
+  /** Same id as backpack `tokenURI` fetch; stabilises companion GLB remounts when traits stream in. */
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -100,18 +179,95 @@ export function HoodratPlayer({
   footSkinEpsilon?: number;
   terrainGround?: { root: THREE.Object3D; minY: number; maxY: number; soleBias?: number };
   portal: HoodratPortalConfig | null;
+  /**
+   * When set (including `[]`), applies the same tribe / skin tint and clothing visibility as
+   * `TraitHoodratPreview` / My Hoodrats GLB export. Omit for the default untinted rig.
+   */
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const gltf = useGLTF(MODEL_URL);
-  const worldScene = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
+  const traitDecorKey =
+    traitAttributes === undefined ? '__default__' : JSON.stringify(traitAttributes);
+  const worldScene = useMemo(() => {
+    const c = SkeletonUtils.clone(gltf.scene);
+    if (traitAttributes !== undefined) {
+      applyTraitAttributesToScene(c, traitAttributes);
+    }
+    return c;
+  }, [gltf.scene, traitDecorKey]);
+
+  /** Token + derived tint/shirtless only — avoids remounting on every metadata array churn (fixes foot offset + flicker). */
+  const companionSceneMemoKey = useMemo(() => {
+    if (companionTraitAttributes === undefined) return '__no_companion__';
+    const v = deriveTraitVisuals(companionTraitAttributes);
+    const id = companionTokenId ?? '—';
+    return `${id}|${v.hideTopClothing ? 1 : 0}|${v.skinTintHex ?? 'none'}`;
+  }, [companionTraitAttributes, companionTokenId]);
+
+  const mainTribeTag = useMemo(() => {
+    if (traitAttributes === undefined) return null;
+    const name = findTraitValue(traitAttributes, /\btribe\b/i);
+    if (!name) return null;
+    return { name, accentHex: deriveTraitVisuals(traitAttributes).skinTintHex };
+  }, [traitDecorKey, traitAttributes]);
+
+  const companionTribeTag = useMemo(() => {
+    if (companionTraitAttributes === undefined) return null;
+    const name = findTraitValue(companionTraitAttributes, /\btribe\b/i);
+    if (!name) return null;
+    return { name, accentHex: deriveTraitVisuals(companionTraitAttributes).skinTintHex };
+  }, [companionSceneMemoKey, companionTraitAttributes]);
+
+  // Remount only when visual fingerprint changes — avoids dispose/layout thrash when traits array churns.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- companionTraitAttributes read at last key change only
+  const companionScene = useMemo(() => {
+    if (companionTraitAttributes === undefined) return null;
+    const c = SkeletonUtils.clone(gltf.scene);
+    applyTraitAttributesToScene(c, companionTraitAttributes);
+    return c;
+  }, [gltf.scene, companionSceneMemoKey]);
+
+  useEffect(() => {
+    return () => {
+      if (traitAttributes !== undefined) {
+        disposeColoredHoodratScene(worldScene);
+      }
+    };
+  }, [traitAttributes, worldScene]);
+
+  useEffect(() => {
+    const scene = companionScene;
+    if (!scene) return;
+    return () => {
+      disposeColoredHoodratScene(scene);
+    };
+  }, [companionScene]);
+
   const { actions, mixer } = useAnimations(gltf.animations, worldScene);
   const { camera, gl } = useThree();
   const [, get] = useKeyboardControls();
 
   const clips = useMemo(() => resolveClips(gltf.animations), [gltf.animations]);
+  const companionGroupRef = useRef<THREE.Group>(null);
+  /** Only the cloned companion scene — layout clears this, not the whole `companionGroupRef` (tags stay). */
+  const companionRigMountRef = useRef<THREE.Group>(null);
+  const { actions: companionActions, mixer: companionMixer } = useAnimations(
+    gltf.animations,
+    companionGroupRef,
+  );
+  const companionBaseYRef = useRef<number>(0);
+  const companionRootBonesRef = useRef<
+    { bone: THREE.Bone; base: { x: number; y: number; z: number } }[]
+  >([]);
+  const prevCompanionActionRef = useRef<THREE.AnimationAction | null>(null);
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
   const spotTargetRef = useRef<THREE.Object3D>(null);
+  const keyLightRef = useRef<THREE.SpotLight>(null);
+  const keyTargetRef = useRef<THREE.Object3D>(null);
   const playerPos = useRef(
     new THREE.Vector3(initialXZ?.x ?? 0, groundY, initialXZ?.z ?? 0),
   );
@@ -119,6 +275,12 @@ export function HoodratPlayer({
   const orbitPitch = useRef(0.3);
   const lookPitch = useRef(0);
   const firstPersonRef = useRef(false);
+  /** Third-person only — hide floating tribe tags in FP (same as body visibility). */
+  const [showNameTags, setShowNameTags] = useState(true);
+  /** Y in `visualRef` space — from main rig bbox top + margin. */
+  const [playerTribeTagY, setPlayerTribeTagY] = useState(DEFAULT_PLAYER_TRIBE_TAG_Y);
+  /** Y in `companionRigMountRef` space — from pet bbox top + margin. */
+  const [companionTribeTagY, setCompanionTribeTagY] = useState(0);
   const prevActionRef = useRef<THREE.AnimationAction | null>(null);
   const locoRef = useRef<LocoMode>('idle');
   const pointerLockedRef = useRef(false);
@@ -137,6 +299,13 @@ export function HoodratPlayer({
     prevActionRef.current?.fadeOut(0.2);
     next.reset().fadeIn(0.2).play();
     prevActionRef.current = next;
+  }, []);
+
+  const fadeToCompanion = useCallback((next: THREE.AnimationAction | null | undefined) => {
+    if (!next) return;
+    prevCompanionActionRef.current?.fadeOut(0.2);
+    next.reset().fadeIn(0.2).play();
+    prevCompanionActionRef.current = next;
   }, []);
 
   useLayoutEffect(() => {
@@ -201,6 +370,7 @@ export function HoodratPlayer({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat || e.code !== 'KeyV') return;
       firstPersonRef.current = !firstPersonRef.current;
+      setShowNameTags(!firstPersonRef.current);
       onViewModeChange?.(firstPersonRef.current ? 'fp' : 'tp');
     };
     window.addEventListener('keydown', onKeyDown);
@@ -219,7 +389,23 @@ export function HoodratPlayer({
     if (spot && tgt) {
       spot.target = tgt;
     }
+    const k = keyLightRef.current;
+    const kt = keyTargetRef.current;
+    if (k && kt) {
+      k.target = kt;
+    }
   }, []);
+
+  const refreshPlayerTribeTagHeight = useCallback(() => {
+    const vis = visualRef.current;
+    if (!vis) return;
+    worldScene.updateMatrixWorld(true);
+    vis.updateMatrixWorld(true);
+    const wb = new THREE.Box3().setFromObject(worldScene, true);
+    _tagInv.copy(vis.matrixWorld).invert();
+    _tagBox.copy(wb).applyMatrix4(_tagInv);
+    setPlayerTribeTagY(_tagBox.max.y + 0.2);
+  }, [worldScene]);
 
   useLayoutEffect(() => {
     const scene = worldScene;
@@ -228,11 +414,87 @@ export function HoodratPlayer({
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene);
     scene.position.y = -box.min.y - feetSink;
+    scene.updateMatrixWorld(true);
+    refreshPlayerTribeTagHeight();
     if (snapFeetToGround) {
       footGroundSnapDoneRef.current = false;
       footGroundSnapFrameRef.current = 0;
     }
-  }, [feetSink, modelScale, snapFeetToGround, worldScene]);
+  }, [feetSink, modelScale, refreshPlayerTribeTagHeight, snapFeetToGround, worldScene]);
+
+  useLayoutEffect(() => {
+    const mount = companionRigMountRef.current;
+    if (!mount) return;
+    for (let i = mount.children.length - 1; i >= 0; i--) {
+      const ch = mount.children[i]!;
+      if (ch.userData?.hoodratCompanionClone) mount.remove(ch);
+    }
+    companionRootBonesRef.current = [];
+    if (companionScene) {
+      const c = companionScene;
+      c.scale.setScalar(1);
+      c.position.set(0, 0, 0);
+      c.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(c);
+      // Main rat `feetSink` can be large in UR (street / GLB alignment). The pet is parented to
+      // the main rig with a small local offset — reusing that sink would shove the mesh meters
+      // below the feet and it reads as “companion never loads” in the rift.
+      const companionSoleSink = Math.min(feetSink, CYBER_FEET_SINK);
+      c.position.y = -box.min.y - companionSoleSink;
+      companionBaseYRef.current = c.position.y;
+      // Root-motion is often authored on hips/root bones. Cache all likely candidates and clamp X/Z.
+      const roots: { bone: THREE.Bone; base: { x: number; y: number; z: number } }[] = [];
+      c.traverse((o) => {
+        if (!(o instanceof THREE.Bone)) return;
+        const n = o.name.toLowerCase();
+        if (n.includes('hips') || n.includes('root')) {
+          roots.push({ bone: o, base: { x: o.position.x, y: o.position.y, z: o.position.z } });
+        }
+      });
+      // Fallback: clamp the first bone if no named roots found.
+      if (roots.length === 0) {
+        let first: THREE.Bone | null = null;
+        c.traverse((o) => {
+          if (first) return;
+          if (o instanceof THREE.Bone) first = o;
+        });
+        if (first) roots.push({ bone: first, base: { x: first.position.x, y: first.position.y, z: first.position.z } });
+      }
+      companionRootBonesRef.current = roots;
+      c.userData.hoodratCompanionClone = true;
+      mount.add(c);
+      mount.updateMatrixWorld(true);
+      c.updateMatrixWorld(true);
+      const wb = new THREE.Box3().setFromObject(c, true);
+      // Tag is parented under `companionGroupRef` (sibling of mount). Transform mesh top from
+      // world → group local — `mount.matrixWorld` alone was wrong here (tag read as ~feet).
+      const grp = companionGroupRef.current;
+      if (grp) {
+        grp.updateMatrixWorld(true);
+        _tagVec.set((wb.min.x + wb.max.x) * 0.5, wb.max.y, (wb.min.z + wb.max.z) * 0.5);
+        grp.worldToLocal(_tagVec);
+        setCompanionTribeTagY(_tagVec.y + COMPANION_TRIBE_TAG_Y_PAD);
+      } else {
+        mount.updateMatrixWorld(true);
+        _tagVec.set((wb.min.x + wb.max.x) * 0.5, wb.max.y, (wb.min.z + wb.max.z) * 0.5);
+        mount.worldToLocal(_tagVec);
+        setCompanionTribeTagY(_tagVec.y + COMPANION_TRIBE_TAG_Y_PAD);
+      }
+    } else {
+      setCompanionTribeTagY(0);
+    }
+  }, [companionScene, feetSink]);
+
+  useEffect(() => {
+    if (!companionScene || !companionActions || !clips.idle || !companionActions[clips.idle]) {
+      return;
+    }
+    const idle = companionActions[clips.idle]!;
+    idle.reset().fadeIn(0.18).play();
+    return () => {
+      idle.fadeOut(0.12);
+    };
+  }, [companionScene, companionActions, clips.idle]);
 
   useEffect(() => {
     if (!actions || !clips.idle || !actions[clips.idle]) return;
@@ -241,6 +503,18 @@ export function HoodratPlayer({
 
   useFrame((_, dt) => {
     if (mixer) mixer.update(dt);
+    if (companionMixer && companionScene) companionMixer.update(dt);
+    // Companion clips include root-motion; clamp it so the pet never drifts away.
+    if (companionScene) {
+      companionScene.position.x = 0;
+      companionScene.position.z = 0;
+      companionScene.position.y = companionBaseYRef.current;
+      for (const { bone, base } of companionRootBonesRef.current) {
+        bone.position.x = base.x;
+        bone.position.z = base.z;
+        // keep authored vertical bounce (y) but prevent “walk away”
+      }
+    }
 
     const locked = pointerLockedRef.current;
     const { forward, back, left, right, run, jump } = get();
@@ -383,22 +657,55 @@ export function HoodratPlayer({
         act.setLoop(THREE.LoopOnce, 1);
         act.clampWhenFinished = true;
         fadeTo(act);
+        if (companionScene && clips.jump && companionActions?.[clips.jump]) {
+          const cAct = companionActions[clips.jump]!;
+          cAct.reset();
+          cAct.setLoop(THREE.LoopOnce, 1);
+          cAct.clampWhenFinished = true;
+          fadeToCompanion(cAct);
+        }
       } else if (targetLoco === 'run' && clips.run && actions?.[clips.run]) {
         const a = actions[clips.run]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.run && companionActions?.[clips.run]) {
+          const cA = companionActions[clips.run]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (targetLoco === 'walk' && clips.walk && actions?.[clips.walk]) {
         const a = actions[clips.walk]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.walk && companionActions?.[clips.walk]) {
+          const cA = companionActions[clips.walk]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (clips.idle && actions?.[clips.idle]) {
         fadeTo(actions[clips.idle]);
+        if (companionScene && clips.idle && companionActions?.[clips.idle]) {
+          fadeToCompanion(companionActions[clips.idle]);
+        }
       }
     }
 
     const p = playerPos.current;
     if (groupRef.current) {
       groupRef.current.position.copy(p);
+    }
+
+    const cg = companionGroupRef.current;
+    if (cg && companionScene) {
+      cg.visible = !firstPersonRef.current;
+      if (cg.visible) {
+        cg.scale.setScalar(modelScale * 0.33);
+        // Companion is parented under `visualRef` (rotates with the main rat),
+        // so we only need a fixed local offset near the right foot.
+        const companionY =
+          COMPANION_LOCAL_Y + (terrainGround ? UR_RIFT_COMPANION_LOCAL_Y_LIFT : 0);
+        cg.position.set(COMPANION_LOCAL_X, companionY, COMPANION_LOCAL_Z);
+      }
     }
 
     if (
@@ -412,7 +719,9 @@ export function HoodratPlayer({
       if (footGroundSnapFrameRef.current >= 10) {
         visualRef.current.updateMatrixWorld(true);
         _footAlignBox.makeEmpty();
-        _footAlignBox.setFromObject(visualRef.current, true);
+        // Measure only the main rig — `visualRef` also contains the companion, and its bbox
+        // would skew `min.y` and push the main character vertically by a bogus `err`.
+        _footAlignBox.setFromObject(worldScene, true);
         if (!_footAlignBox.isEmpty()) {
           const targetSoleY = terrainGround
             ? floorAt(p.x, p.z, p.y) - footSkinEpsilon
@@ -420,6 +729,7 @@ export function HoodratPlayer({
           const err = targetSoleY - _footAlignBox.min.y;
           if (Number.isFinite(err) && Math.abs(err) < 6) {
             worldScene.position.y += err;
+            refreshPlayerTribeTagHeight();
           }
         }
         footGroundSnapDoneRef.current = true;
@@ -468,11 +778,20 @@ export function HoodratPlayer({
       camera.position.set(p.x + ox, p.y + oy, p.z + oz);
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
+
+    // Key light: sits at the camera and aims at the player so the rat reads clearly.
+    const key = keyLightRef.current;
+    const kt = keyTargetRef.current;
+    if (key && kt) {
+      key.position.set(camera.position.x - p.x, camera.position.y - p.y + 0.12, camera.position.z - p.z);
+      kt.position.set(0, 1.05, 0);
+    }
   });
 
   return (
     <group ref={groupRef}>
       <object3D ref={spotTargetRef} position={[0, 0.72, 0.28]} />
+      <object3D ref={keyTargetRef} position={[0, 1.05, 0]} />
       <spotLight
         ref={spotRef}
         position={[-3.6, 4.6, 3.4]}
@@ -482,6 +801,17 @@ export function HoodratPlayer({
         distance={52}
         decay={1.82}
         color="#e6d8c8"
+        castShadow={false}
+      />
+      <spotLight
+        ref={keyLightRef}
+        position={[0, 2.2, 4.2]}
+        angle={0.75}
+        penumbra={0.9}
+        intensity={32}
+        distance={18}
+        decay={1.7}
+        color="#fff3e6"
         castShadow={false}
       />
       <pointLight
@@ -507,6 +837,25 @@ export function HoodratPlayer({
       />
       <group ref={visualRef}>
         <primitive object={worldScene} />
+        {showNameTags && mainTribeTag && (
+          <TribeNameBillboard
+            variant="player"
+            text={mainTribeTag.name}
+            accentHex={mainTribeTag.accentHex}
+            y={playerTribeTagY}
+          />
+        )}
+        <group ref={companionGroupRef}>
+          <group ref={companionRigMountRef} />
+          {showNameTags && companionTribeTag && companionScene && companionTribeTagY > 0.01 && (
+            <TribeNameBillboard
+              variant="companion"
+              text={companionTribeTag.name}
+              accentHex={companionTribeTag.accentHex}
+              y={companionTribeTagY}
+            />
+          )}
+        </group>
       </group>
     </group>
   );

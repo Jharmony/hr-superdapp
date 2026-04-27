@@ -10,8 +10,15 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { AppErrorBoundary } from '../AppErrorBoundary';
+import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
+import type { TraitAttr } from '../../lib/traitVisual';
+import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
+import { MintDockChrome } from '../mint/MintPanel';
+import { WorldTbaHud } from './WorldTbaHud';
+import { WorldWalletHud } from './WorldWalletHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
@@ -169,9 +176,15 @@ function NeonFloor() {
 function WorldScene({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
+  companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   return (
     <>
@@ -221,9 +234,7 @@ function WorldScene({
 
       <CyberBuildings />
 
-      <Suspense fallback={null}>
-        <CyberRiftPortal />
-      </Suspense>
+      <CyberRiftPortal />
 
       <Suspense
         fallback={
@@ -242,6 +253,9 @@ function WorldScene({
           initialCamYaw={0}
           feetSink={0}
           snapFeetToGround
+          traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -267,9 +281,15 @@ const cyberInitialCameraPosition: [number, number, number] = [
 function WorldCanvas({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
+  companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -291,15 +311,85 @@ function WorldCanvas({
       }}
     >
       <KeyboardControls map={keyMap}>
-        <WorldScene onLockChange={onLockChange} onViewModeChange={onViewModeChange} />
+        <WorldScene
+          onLockChange={onLockChange}
+          onViewModeChange={onViewModeChange}
+          traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
+        />
       </KeyboardControls>
     </Canvas>
   );
 }
 
-export function CyberWorldApp() {
+function CyberWorldExperience() {
+  const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
+  const { companionTraitAttributes, companionTokenId } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
+
+  return (
+    <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
+      <a
+        href="/"
+        className="pointer-events-auto absolute left-3 top-3 z-[230] rounded-xl border border-zinc-700/90 bg-zinc-950/90 px-4 py-2 text-xs font-bold uppercase tracking-wide text-zinc-200 shadow-lg backdrop-blur-sm transition hover:border-lime-500/40 hover:text-lime-200 md:left-4 md:top-4"
+      >
+        ← Exit
+      </a>
+      <div className="pointer-events-none absolute right-3 top-3 z-[230] rounded-lg border border-fuchsia-500/25 bg-zinc-950/75 px-3 py-1.5 text-right md:right-4 md:top-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-fuchsia-200/90">
+          HOOD-420PJ
+        </p>
+        <p className="text-[10px] text-zinc-500">
+          {viewMode === 'fp' ? 'first-person' : 'third-person'}
+        </p>
+      </div>
+
+      <WorldTbaHud activeTokenId={activeTokenId} />
+      <WorldWalletHud />
+      <MintDockChrome detailsHref="/#mint" zIndexClass="z-[229]" />
+
+      <div className="h-full w-full pt-14 md:pt-0">
+        <AppErrorBoundary
+          layout="immersive"
+          title="Cyber district 3D could not load"
+          hint={
+            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
+              The Hoodrat and/or portal GLB failed to load. Set{' '}
+              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> and{' '}
+              <code className="text-lime-200/90">PUBLIC_PORTAL_MODEL_URL</code> to HTTPS URLs (for example
+              Arweave), or include the files under <code className="text-zinc-200">public/models/</code>.
+            </p>
+          }
+        >
+          <WorldCanvas
+            onLockChange={setLocked}
+            onViewModeChange={setViewMode}
+            traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
+          />
+        </AppErrorBoundary>
+      </div>
+
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[225] bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-16 text-center transition-opacity duration-300 ${
+          locked ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
+        <p className="text-xs font-semibold text-cyan-200/90">
+          Click the world — you are the Hoodrat
+        </p>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          WASD move · Shift run · Space jump · walk to the rift ahead to travel · V view mode · Esc unlocks
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function CyberWorldApp() {
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
@@ -326,51 +416,8 @@ export function CyberWorldApp() {
   }
 
   return (
-    <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
-      <a
-        href="/"
-        className="pointer-events-auto absolute left-3 top-3 z-[230] rounded-xl border border-zinc-700/90 bg-zinc-950/90 px-4 py-2 text-xs font-bold uppercase tracking-wide text-zinc-200 shadow-lg backdrop-blur-sm transition hover:border-lime-500/40 hover:text-lime-200 md:left-4 md:top-4"
-      >
-        ← Exit
-      </a>
-      <div className="pointer-events-none absolute right-3 top-3 z-[230] rounded-lg border border-fuchsia-500/25 bg-zinc-950/75 px-3 py-1.5 text-right md:right-4 md:top-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-fuchsia-200/90">
-          HOOD-420PJ
-        </p>
-        <p className="text-[10px] text-zinc-500">
-          {viewMode === 'fp' ? 'first-person' : 'third-person'}
-        </p>
-      </div>
-
-      <div className="h-full w-full pt-14 md:pt-0">
-        <AppErrorBoundary
-          layout="immersive"
-          title="Cyber district 3D could not load"
-          hint={
-            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
-              The Hoodrat and/or portal GLB failed to load. Set{' '}
-              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> and{' '}
-              <code className="text-lime-200/90">PUBLIC_PORTAL_MODEL_URL</code> to HTTPS URLs (for example
-              Arweave), or include the files under <code className="text-zinc-200">public/models/</code>.
-            </p>
-          }
-        >
-          <WorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
-        </AppErrorBoundary>
-      </div>
-
-      <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[225] bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-16 text-center transition-opacity duration-300 ${
-          locked ? 'opacity-0' : 'opacity-100'
-        }`}
-      >
-        <p className="text-xs font-semibold text-cyan-200/90">
-          Click the world — you are the Hoodrat
-        </p>
-        <p className="mt-1 text-[11px] text-zinc-500">
-          WASD move · Shift run · Space jump · walk to the rift ahead to travel · V view mode · Esc unlocks
-        </p>
-      </div>
-    </div>
+    <Web3Providers>
+      <CyberWorldExperience />
+    </Web3Providers>
   );
 }

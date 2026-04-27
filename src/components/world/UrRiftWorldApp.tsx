@@ -1,6 +1,10 @@
 import { Environment, Html, KeyboardControls, useGLTF } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { AppErrorBoundary } from '../AppErrorBoundary';
+import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
+import type { TraitAttr } from '../../lib/traitVisual';
+import { Web3Providers } from '../web3/Web3Providers';
 import {
   Suspense,
   useCallback,
@@ -13,6 +17,9 @@ import {
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { HoodratPlayer } from './HoodratPlayer';
+import { MintDockChrome } from '../mint/MintPanel';
+import { WorldTbaHud } from './WorldTbaHud';
+import { WorldWalletHud } from './WorldWalletHud';
 import { circleIntersectsObstacle, type XZRect } from './collision';
 import { GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
@@ -435,9 +442,15 @@ function UrEnvironment({ onSized }: { onSized: (b: UrBounds) => void }) {
 function UrWorldScene({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
+  companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const [bounds, setBounds] = useState<UrBounds | null>(null);
   const onSized = useCallback((b: UrBounds) => {
@@ -483,6 +496,10 @@ function UrWorldScene({
       >
         {bounds ? (
           <HoodratPlayer
+            // Do not key on stringified traits: companion metadata often resolves after the
+            // rift GLB sets `bounds`; remounting the whole player on that update can leave the pet
+            // missing. Cyber district omits this key — trait / companion scenes update inside
+            // `HoodratPlayer` via `useMemo` instead.
             key={`${bounds.worldXZLim}-${bounds.obstacles.length}`}
             onLockChange={onLockChange}
             onViewModeChange={onViewModeChange}
@@ -494,6 +511,9 @@ function UrWorldScene({
             feetSink={UR_HOODRAT_FEET_SINK}
             snapFeetToGround
             footSkinEpsilon={0.022}
+            traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
             terrainGround={{
               root: bounds.terrainRoot,
               minY: urFootTargetY() - 24,
@@ -511,9 +531,15 @@ function UrWorldScene({
 function UrWorldCanvas({
   onLockChange,
   onViewModeChange,
+  traitAttributes,
+  companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -535,15 +561,87 @@ function UrWorldCanvas({
       }}
     >
       <KeyboardControls map={keyMap}>
-        <UrWorldScene onLockChange={onLockChange} onViewModeChange={onViewModeChange} />
+        <UrWorldScene
+          onLockChange={onLockChange}
+          onViewModeChange={onViewModeChange}
+          traitAttributes={traitAttributes}
+          companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
+        />
       </KeyboardControls>
     </Canvas>
   );
 }
 
-export function UrRiftWorldApp() {
+function UrRiftWorldExperience() {
+  const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
+  const { companionTraitAttributes, companionTokenId } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
+
+  return (
+    <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
+      <a
+        href="/world/"
+        className="pointer-events-auto absolute left-3 top-3 z-[230] rounded-xl border border-zinc-700/90 bg-zinc-950/90 px-4 py-2 text-xs font-bold uppercase tracking-wide text-zinc-200 shadow-lg backdrop-blur-sm transition hover:border-cyan-500/40 hover:text-cyan-200 md:left-4 md:top-4"
+      >
+        ← Cyber district
+      </a>
+      <a
+        href="/"
+        className="pointer-events-auto absolute left-3 top-[3.25rem] z-[230] rounded-xl border border-zinc-700/80 bg-zinc-950/85 px-4 py-2 text-xs font-semibold text-zinc-300 shadow-lg backdrop-blur-sm transition hover:border-zinc-500 md:left-4 md:top-[3.75rem]"
+      >
+        Home
+      </a>
+      <div className="pointer-events-none absolute right-3 top-3 z-[230] rounded-lg border border-cyan-500/25 bg-zinc-950/75 px-3 py-1.5 text-right md:right-4 md:top-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/90">UR rift</p>
+        <p className="text-[10px] text-zinc-500">
+          {viewMode === 'fp' ? 'first-person' : 'third-person'}
+        </p>
+      </div>
+
+      <WorldTbaHud activeTokenId={activeTokenId} />
+      <WorldWalletHud />
+      <MintDockChrome detailsHref="/#mint" zIndexClass="z-[229]" />
+
+      <div className="h-full w-full pt-14 md:pt-0">
+        <AppErrorBoundary
+          layout="immersive"
+          title="UR rift world could not load"
+          hint={
+            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
+              The rift map and/or Hoodrat GLB failed to load. Set{' '}
+              <code className="text-lime-200/90">PUBLIC_UR_WORLD_MODEL_URL</code> and{' '}
+              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> to HTTPS URLs, or ship the
+              files under <code className="text-zinc-200">public/models/</code>.
+            </p>
+          }
+        >
+          <UrWorldCanvas
+            onLockChange={setLocked}
+            onViewModeChange={setViewMode}
+            traitAttributes={traitAttributes}
+            companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
+          />
+        </AppErrorBoundary>
+      </div>
+
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[225] bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-16 text-center transition-opacity duration-300 ${
+          locked ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
+        <p className="text-xs font-semibold text-cyan-200/90">Click the world — explore the rift</p>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          WASD move · Shift run · Space jump · V view mode · Esc unlocks
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function UrRiftWorldApp() {
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
@@ -570,53 +668,8 @@ export function UrRiftWorldApp() {
   }
 
   return (
-    <div className="fixed inset-0 z-[220] overflow-hidden bg-black">
-      <a
-        href="/world/"
-        className="pointer-events-auto absolute left-3 top-3 z-[230] rounded-xl border border-zinc-700/90 bg-zinc-950/90 px-4 py-2 text-xs font-bold uppercase tracking-wide text-zinc-200 shadow-lg backdrop-blur-sm transition hover:border-cyan-500/40 hover:text-cyan-200 md:left-4 md:top-4"
-      >
-        ← Cyber district
-      </a>
-      <a
-        href="/"
-        className="pointer-events-auto absolute left-3 top-[3.25rem] z-[230] rounded-xl border border-zinc-700/80 bg-zinc-950/85 px-4 py-2 text-xs font-semibold text-zinc-300 shadow-lg backdrop-blur-sm transition hover:border-zinc-500 md:left-4 md:top-[3.75rem]"
-      >
-        Home
-      </a>
-      <div className="pointer-events-none absolute right-3 top-3 z-[230] rounded-lg border border-cyan-500/25 bg-zinc-950/75 px-3 py-1.5 text-right md:right-4 md:top-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/90">UR rift</p>
-        <p className="text-[10px] text-zinc-500">
-          {viewMode === 'fp' ? 'first-person' : 'third-person'}
-        </p>
-      </div>
-
-      <div className="h-full w-full pt-14 md:pt-0">
-        <AppErrorBoundary
-          layout="immersive"
-          title="UR rift world could not load"
-          hint={
-            <p className="mt-3 max-w-md text-xs leading-relaxed text-zinc-400">
-              The rift map and/or Hoodrat GLB failed to load. Set{' '}
-              <code className="text-lime-200/90">PUBLIC_UR_WORLD_MODEL_URL</code> and{' '}
-              <code className="text-lime-200/90">PUBLIC_HOODRATS_MODEL_URL</code> to HTTPS URLs, or ship the
-              files under <code className="text-zinc-200">public/models/</code>.
-            </p>
-          }
-        >
-          <UrWorldCanvas onLockChange={setLocked} onViewModeChange={setViewMode} />
-        </AppErrorBoundary>
-      </div>
-
-      <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[225] bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-16 text-center transition-opacity duration-300 ${
-          locked ? 'opacity-0' : 'opacity-100'
-        }`}
-      >
-        <p className="text-xs font-semibold text-cyan-200/90">Click the world — explore the rift</p>
-        <p className="mt-1 text-[11px] text-zinc-500">
-          WASD move · Shift run · Space jump · V view mode · Esc unlocks
-        </p>
-      </div>
-    </div>
+    <Web3Providers>
+      <UrRiftWorldExperience />
+    </Web3Providers>
   );
 }

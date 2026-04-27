@@ -51,7 +51,7 @@ export function TokenboundShowcasePanel() {
   });
 
   const loading = uriLoading || metaLoading;
-  const anim = meta?.animation_url?.trim();
+  const anim = meta?.animation_url ? resolveUri(meta.animation_url) : undefined;
   const img = meta?.image ? resolveUri(meta.image) : undefined;
   const title = meta?.name ?? `HOODRAT #${tokenId}`;
 
@@ -111,7 +111,6 @@ export function TokenboundShowcasePanel() {
               className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
               loading="lazy"
               allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
-              referrerPolicy="no-referrer"
             />
           </div>
         ) : img ? (

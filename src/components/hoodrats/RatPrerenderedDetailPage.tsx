@@ -5,6 +5,7 @@ import { SiteNav } from '../nav/SiteNav';
 import { MintDockChrome } from '../mint/MintPanel';
 import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
+import { TbaBackpackPanel } from './TbaBackpackPanel';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
 
@@ -57,17 +58,34 @@ export function RatPrerenderedDetailPage({
           </div>
         </div>
 
+        <div className="mx-auto mt-8 w-full max-w-3xl">
+          <TbaBackpackPanel tokenId={tokenId} />
+        </div>
+
         <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-black shadow-2xl">
           {anim ? (
-            <div className="relative mx-auto aspect-square w-full overflow-hidden bg-black">
-              <iframe
-                title={`Tokenbound ${tokenId}`}
-                src={anim}
-                className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
-                loading="lazy"
-                allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
-              />
-            </div>
+            <>
+              <div className="relative mx-auto aspect-square w-full overflow-hidden bg-black">
+                <iframe
+                  title={`Tokenbound ${tokenId}`}
+                  src={anim}
+                  className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
+                  loading="lazy"
+                  allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs">
+                <span className="truncate text-zinc-500">Interactive view</span>
+                <a
+                  href={anim}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 font-semibold text-zinc-200 transition hover:border-lime-500/35 hover:text-lime-200"
+                >
+                  Open in new tab
+                </a>
+              </div>
+            </>
           ) : imgUrl ? (
             <FallbackImage
               src={imgUrl}

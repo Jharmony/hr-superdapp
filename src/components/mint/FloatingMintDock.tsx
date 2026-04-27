@@ -5,6 +5,8 @@ export type FloatingMintDockProps = HoodratsMint & {
   onToggleDockCompact?: () => void;
   /** In-page `#mint` on home; use `"/#mint"` on other routes. */
   detailsHref?: string;
+  /** Z-index class for overlaying different shells (worlds use higher). */
+  zIndexClass?: string;
 };
 
 function IconChevronDown({ className }: { className?: string }) {
@@ -36,6 +38,7 @@ export function FloatingMintDock(props: FloatingMintDockProps) {
     dockCompact = false,
     onToggleDockCompact,
     detailsHref = '#mint',
+    zIndexClass = 'z-[100]',
     ...m
   } = props;
   const canMint =
@@ -49,7 +52,7 @@ export function FloatingMintDock(props: FloatingMintDockProps) {
   if (dockCompact && onToggleDockCompact) {
     return (
       <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1"
+        className={`pointer-events-none fixed inset-x-0 bottom-0 ${zIndexClass} flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1`}
         aria-label="Quick mint"
       >
         <div className="pointer-events-auto flex h-11 w-full max-w-lg items-center gap-2 rounded-2xl border border-zinc-700/90 bg-zinc-950/95 px-3 shadow-[0_-8px_40px_rgba(0,0,0,0.55)] backdrop-blur-md md:max-w-2xl">
@@ -83,7 +86,7 @@ export function FloatingMintDock(props: FloatingMintDockProps) {
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1"
+      className={`pointer-events-none fixed inset-x-0 bottom-0 ${zIndexClass} flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1`}
       aria-label="Quick mint"
     >
       <div className="pointer-events-auto relative w-full max-w-lg rounded-2xl border border-zinc-700/90 bg-zinc-950/95 p-2.5 shadow-[0_-8px_40px_rgba(0,0,0,0.55)] backdrop-blur-md md:max-w-2xl md:p-3">

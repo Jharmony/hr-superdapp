@@ -8,9 +8,17 @@ import {
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib';
+import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
+import {
+  applyTraitAttributesToScene,
+  disposeColoredHoodratScene,
+} from '../../lib/hoodratTraitApplyThree';
+import type { TraitAttr } from '../../lib/traitVisual';
+import { preferTurboGatewayUrl } from '../../lib/arweaveGateways';
 
 const MODEL_URL =
-  (import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() ||
+  preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
 /** Logical controls — mapped to whatever clip names exist on the GLB. */
@@ -39,11 +47,28 @@ type HoodratSceneProps = {
   intent: HoodratHeroIntent;
   setIntent: (v: HoodratHeroIntent) => void;
   onClips: (c: ResolvedClips) => void;
+  traitAttributes?: TraitAttr[];
 };
 
-function HoodratScene({ intent, setIntent, onClips }: HoodratSceneProps) {
+function HoodratScene({ intent, setIntent, onClips, traitAttributes }: HoodratSceneProps) {
   const gltf = useGLTF(MODEL_URL);
-  const { actions, mixer } = useAnimations(gltf.animations, gltf.scene);
+
+  const sceneForAnim = useMemo(() => {
+    if (traitAttributes === undefined) return gltf.scene;
+    const c = SkeletonUtils.clone(gltf.scene);
+    applyTraitAttributesToScene(c, traitAttributes);
+    return c;
+  }, [gltf.scene, traitAttributes]);
+
+  useEffect(() => {
+    return () => {
+      if (sceneForAnim !== gltf.scene) {
+        disposeColoredHoodratScene(sceneForAnim);
+      }
+    };
+  }, [sceneForAnim, gltf.scene]);
+
+  const { actions, mixer } = useAnimations(gltf.animations, sceneForAnim);
 
   const clips = useMemo(() => resolveClips(gltf.animations), [gltf.animations]);
 
@@ -57,7 +82,7 @@ function HoodratScene({ intent, setIntent, onClips }: HoodratSceneProps) {
   const prevLocoRef = useRef<Exclude<HoodratHeroIntent, 'jump'>>('idle');
 
   useEffect(() => {
-    gltf.scene.traverse((o) => {
+    sceneForAnim.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow = true;
         o.receiveShadow = true;
@@ -80,7 +105,7 @@ function HoodratScene({ intent, setIntent, onClips }: HoodratSceneProps) {
         }
       }
     });
-  }, [gltf.scene]);
+  }, [sceneForAnim]);
 
   useEffect(() => {
     if (intent !== 'jump') {
@@ -190,7 +215,7 @@ function HoodratScene({ intent, setIntent, onClips }: HoodratSceneProps) {
     <>
       <group position={[0, -1.05, 0]} scale={1.12}>
         <group ref={patrolRef}>
-          <primitive object={gltf.scene} />
+          <primitive object={sceneForAnim} />
         </group>
       </group>
       <OrbitControls
@@ -242,9 +267,13 @@ function AnimToolbar({
 }
 
 export function HoodratHeroCanvas() {
+  const { traitAttributes } = useActiveHoodratTraitAttributes();
   const [reduceMotion, setReduceMotion] = useState(false);
   const [intent, setIntent] = useState<HoodratHeroIntent>('walk');
   const [clips, setClips] = useState<ResolvedClips | null>(null);
+
+  const sceneKey =
+    traitAttributes === undefined ? 'hero-default' : `hero-${JSON.stringify(traitAttributes)}`;
 
   const clipsInitRef = useRef(false);
   const onClips = useCallback((c: ResolvedClips) => {
@@ -327,7 +356,13 @@ export function HoodratHeroCanvas() {
             <planeGeometry args={[12, 12]} />
             <shadowMaterial opacity={0.35} />
           </mesh>
-          <HoodratScene intent={intent} setIntent={setIntent} onClips={onClips} />
+          <HoodratScene
+            key={sceneKey}
+            intent={intent}
+            setIntent={setIntent}
+            onClips={onClips}
+            traitAttributes={traitAttributes}
+          />
         </Suspense>
       </Canvas>
 
@@ -335,6 +370,11 @@ export function HoodratHeroCanvas() {
         <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center px-2">
           <AnimToolbar clips={clips} intent={intent} setIntent={setIntent} />
         </div>
+      ) : null}
+      {traitAttributes !== undefined ? (
+        <p className="pointer-events-none absolute inset-x-0 bottom-[4.75rem] z-10 text-center text-[10px] font-medium text-lime-300/85 md:bottom-[5rem]">
+          Your active Hoodrat · tribe tint from metadata
+        </p>
       ) : null}
     </div>
   );
