@@ -102,15 +102,17 @@ export const HoodratRainbowAvatar: AvatarComponent = ({ address, ensImage, size 
 
   if (ensImage) {
     return (
-      <img
-        alt=""
-        src={ensImage}
-        width={size}
-        height={size}
-        className={`${wrapClass} object-cover`}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-      />
+      <span className={wrapClass} style={{ width: s, height: s }} aria-hidden>
+        <img
+          alt=""
+          src={ensImage}
+          width={size}
+          height={size}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+      </span>
     );
   }
 

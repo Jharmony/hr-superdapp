@@ -3,12 +3,12 @@ import { useMemo } from 'react';
 import { useReadContract } from 'wagmi';
 import { hoodratsChainId } from '../lib/chain';
 import { HOODRATS_ADDRESS, hoodratsAbi } from '../lib/contract';
-import type { NftMetadata } from '../lib/metadata';
-import type { TraitAttr } from '../lib/traitVisual';
+import { normalizeNftAttributesToTraits, type NftMetadata } from '../lib/metadata';
+import { mergeCompanionChainAndOpenSeaTraits, type TraitAttr } from '../lib/traitVisual';
 import { resolveUri } from '../lib/uri';
 
 type BackpackJson = {
-  nfts?: { contract: string; tokenId: string }[];
+  nfts?: { contract: string; tokenId: string; traits?: { trait_type: string; value: string | number }[] }[];
   error?: string;
 };
 
@@ -20,17 +20,19 @@ const HOODRATS_LC = HOODRATS_ADDRESS.toLowerCase();
  */
 export function useBackpackWorldVisuals(activeTokenId: number | null): {
   backpackNftCount: number;
+  /** Backpack Hoodrat token used as the in-world pet (same id as `tokenURI` fetch). */
+  companionTokenId: number | null;
   companionTraitAttributes: TraitAttr[] | undefined;
 } {
   const backpackQ = useQuery({
     queryKey: ['backpack-world-visual', activeTokenId],
     queryFn: async () => {
-      if (activeTokenId == null) return { nfts: [] as { contract: string; tokenId: string }[] };
+      if (activeTokenId == null) return { nfts: [] as BackpackJson['nfts'] };
       const res = await fetch(
         `/api/tba/backpack.json?tokenId=${encodeURIComponent(String(activeTokenId))}`,
       );
       const j = (await res.json()) as BackpackJson;
-      if (!res.ok || j.error) return { nfts: [] as { contract: string; tokenId: string }[] };
+      if (!res.ok || j.error) return { nfts: [] as BackpackJson['nfts'] };
       return { nfts: Array.isArray(j.nfts) ? j.nfts : [] };
     },
     enabled: activeTokenId != null,
@@ -78,11 +80,40 @@ export function useBackpackWorldVisuals(activeTokenId: number | null): {
     retry: 1,
   });
 
+  const companionOsTraitAttrs = useMemo((): TraitAttr[] | undefined => {
+    const rows = companionEntry?.traits;
+    if (!rows?.length) return undefined;
+    return rows.map((r) => ({
+      trait_type: r.trait_type,
+      value: typeof r.value === 'number' ? r.value : String(r.value).trim(),
+    }));
+  }, [companionEntry]);
+
   const companionTraitAttributes = useMemo((): TraitAttr[] | undefined => {
     if (validCompanionId == null) return undefined;
-    if (!metaQ.data) return undefined;
-    return metaQ.data.attributes ?? [];
-  }, [validCompanionId, metaQ.data]);
+    const fromChain = metaQ.data ? normalizeNftAttributesToTraits(metaQ.data) : [];
+    const merged = mergeCompanionChainAndOpenSeaTraits(fromChain, companionOsTraitAttrs);
 
-  return { backpackNftCount, companionTraitAttributes };
+    if (merged.length > 0) return merged;
+
+    const uriReady = typeof rawUri === 'string' && rawUri.length > 0;
+    const chainStillLoading =
+      uriReady && (metaQ.isPending || metaQ.isLoading) && validCompanionId != null;
+    if (chainStillLoading && !companionOsTraitAttrs?.length) return undefined;
+
+    return merged;
+  }, [
+    validCompanionId,
+    rawUri,
+    metaQ.data,
+    metaQ.isPending,
+    metaQ.isLoading,
+    companionOsTraitAttrs,
+  ]);
+
+  return {
+    backpackNftCount,
+    companionTokenId: validCompanionId,
+    companionTraitAttributes,
+  };
 }

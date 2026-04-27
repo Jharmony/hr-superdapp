@@ -17,6 +17,7 @@ import {
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { HoodratPlayer } from './HoodratPlayer';
+import { MintDockChrome } from '../mint/MintPanel';
 import { WorldTbaHud } from './WorldTbaHud';
 import { WorldWalletHud } from './WorldWalletHud';
 import { circleIntersectsObstacle, type XZRect } from './collision';
@@ -443,11 +444,13 @@ function UrWorldScene({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const [bounds, setBounds] = useState<UrBounds | null>(null);
   const onSized = useCallback((b: UrBounds) => {
@@ -510,6 +513,7 @@ function UrWorldScene({
             footSkinEpsilon={0.022}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
             terrainGround={{
               root: bounds.terrainRoot,
               minY: urFootTargetY() - 24,
@@ -529,11 +533,13 @@ function UrWorldCanvas({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -560,6 +566,7 @@ function UrWorldCanvas({
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
         />
       </KeyboardControls>
     </Canvas>
@@ -568,7 +575,7 @@ function UrWorldCanvas({
 
 function UrRiftWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
-  const { companionTraitAttributes } = useBackpackWorldVisuals(activeTokenId);
+  const { companionTraitAttributes, companionTokenId } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -595,6 +602,7 @@ function UrRiftWorldExperience() {
 
       <WorldTbaHud activeTokenId={activeTokenId} />
       <WorldWalletHud />
+      <MintDockChrome detailsHref="/#mint" zIndexClass="z-[229]" />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary
@@ -614,6 +622,7 @@ function UrRiftWorldExperience() {
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
           />
         </AppErrorBoundary>
       </div>

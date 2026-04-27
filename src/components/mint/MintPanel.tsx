@@ -4,7 +4,13 @@ import { useHoodratsMint, type HoodratsMint } from './useHoodratsMint';
 import { useMintDockLayout } from './useMintDockLayout';
 
 /** Floating mint bar only (use on pages that do not render `MintSection`). */
-export function MintDockChrome({ detailsHref = '/#mint' }: { detailsHref?: string }) {
+export function MintDockChrome({
+  detailsHref = '/#mint',
+  zIndexClass,
+}: {
+  detailsHref?: string;
+  zIndexClass?: string;
+}) {
   const mint = useHoodratsMint();
   const { dockCompact, toggleDockCompact } = useMintDockLayout();
 
@@ -14,6 +20,7 @@ export function MintDockChrome({ detailsHref = '/#mint' }: { detailsHref?: strin
       dockCompact={dockCompact}
       onToggleDockCompact={toggleDockCompact}
       detailsHref={detailsHref}
+      zIndexClass={zIndexClass}
     />
   );
 }

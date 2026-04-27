@@ -1,9 +1,10 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatEther } from 'viem';
 import { useBalance } from 'wagmi';
 import { hoodratsChainId } from '../../lib/chain';
 import { etherscanAddressUrl } from '../../lib/nftMarketLinks';
+import { HoodratRainbowAvatar } from '../web3/HoodratRainbowAvatar';
 
 function shortenAddress(a: string): string {
   if (a.length < 12) return a;
@@ -27,9 +28,17 @@ type ConnectedProps = {
   chainName: string;
   chainId: number;
   onOpenAccount: () => void;
+  hideAddressRow?: boolean;
 };
 
-function ConnectedWalletPanel({ address, ensName, chainName, chainId, onOpenAccount }: ConnectedProps) {
+function ConnectedWalletPanel({
+  address,
+  ensName,
+  chainName,
+  chainId,
+  onOpenAccount,
+  hideAddressRow = false,
+}: ConnectedProps) {
   const displayLabel = ensName?.trim() || shortenAddress(address);
   const { data: bal, isLoading } = useBalance({ address });
   const onMainnet = chainId === hoodratsChainId;
@@ -46,15 +55,17 @@ function ConnectedWalletPanel({ address, ensName, chainName, chainId, onOpenAcco
   return (
     <div className="w-full max-w-[15rem] rounded-xl border border-emerald-500/35 bg-zinc-950/92 px-3 py-2 shadow-lg backdrop-blur-sm">
       <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/90">Wallet</p>
-      <button
-        type="button"
-        onClick={onOpenAccount}
-        className="mt-1 w-full truncate text-left font-mono text-[11px] text-zinc-100 underline-offset-2 hover:text-emerald-200 hover:underline"
-        title={address}
-      >
-        {displayLabel}
-      </button>
-      <p className="mt-0.5 text-[10px] text-zinc-500">{chainName}</p>
+      {hideAddressRow ? null : (
+        <button
+          type="button"
+          onClick={onOpenAccount}
+          className="mt-1 w-full truncate text-left font-mono text-[11px] text-zinc-100 underline-offset-2 hover:text-emerald-200 hover:underline"
+          title={address}
+        >
+          {displayLabel}
+        </button>
+      )}
+      <p className={`${hideAddressRow ? 'mt-1' : 'mt-0.5'} text-[10px] text-zinc-500`}>{chainName}</p>
       {!onMainnet ? (
         <p className="mt-1 text-[9px] leading-snug text-amber-200/90">
           Hoodrats worlds expect <span className="font-semibold text-amber-100">Ethereum</span> — switch
@@ -88,6 +99,51 @@ function ConnectedWalletPanel({ address, ensName, chainName, chainId, onOpenAcco
   );
 }
 
+function ConnectedWalletCompact({
+  address,
+  ensName,
+  onOpenAccount,
+  onToggle,
+  expanded,
+}: {
+  address: `0x${string}`;
+  ensName?: string | null;
+  onOpenAccount: () => void;
+  onToggle: () => void;
+  expanded: boolean;
+}) {
+  const displayLabel = ensName?.trim() || shortenAddress(address);
+  return (
+    <div className="inline-flex max-w-[min(100vw-1.5rem,15rem)] items-center gap-2 rounded-xl border border-emerald-500/35 bg-zinc-950/92 px-2.5 py-2 text-left shadow-lg backdrop-blur-sm">
+      <button
+        type="button"
+        onClick={onOpenAccount}
+        className="shrink-0 overflow-hidden rounded-full ring-1 ring-emerald-500/35 transition hover:ring-emerald-400/60"
+        style={{ width: 22, height: 22 }}
+        aria-label="Open wallet menu"
+      >
+        <HoodratRainbowAvatar address={address} size={22} />
+      </button>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex min-w-0 flex-1 items-center gap-2"
+      >
+        <span className="min-w-0 max-w-[12.5rem] truncate font-mono text-[11px] font-semibold text-zinc-100">
+          {displayLabel}
+        </span>
+        <span
+          className={`shrink-0 text-[11px] text-emerald-200/80 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          aria-hidden
+        >
+          ▾
+        </span>
+      </button>
+    </div>
+  );
+}
+
 /**
  * Compact wallet strip for 3D worlds — bottom-right, mirrors {@link WorldTbaHud} on the left.
  */
@@ -104,14 +160,40 @@ export function WorldWalletHud() {
       }) => {
         const ready = mounted;
         const connected = ready && account && chain;
+        const [expanded, setExpanded] = useState(false);
+        const rootRef = useRef<HTMLDivElement>(null);
+
+        useEffect(() => {
+          if (!expanded) return;
+          const onDoc = (e: MouseEvent) => {
+            if (rootRef.current?.contains(e.target as Node)) return;
+            setExpanded(false);
+          };
+          const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setExpanded(false);
+          };
+          document.addEventListener('mousedown', onDoc);
+          document.addEventListener('keydown', onKey);
+          return () => {
+            document.removeEventListener('mousedown', onDoc);
+            document.removeEventListener('keydown', onKey);
+          };
+        }, [expanded]);
+
+        useEffect(() => {
+          if (!connected) setExpanded(false);
+        }, [connected]);
 
         return (
           <div
-            className="pointer-events-auto absolute bottom-4 right-3 z-[228] w-[min(15rem,calc(100vw-1.5rem))] md:bottom-5 md:right-4"
+            className={`pointer-events-auto absolute bottom-4 right-3 z-[228] md:bottom-5 md:right-4 ${
+              expanded ? 'w-[min(15rem,calc(100vw-1.5rem))]' : 'w-auto'
+            }`}
             {...(!ready && {
               'aria-hidden': true,
               style: { opacity: 0, pointerEvents: 'none', userSelect: 'none' },
             })}
+            ref={rootRef}
           >
             {!ready ? null : !connected ? (
               <button
@@ -130,13 +212,27 @@ export function WorldWalletHud() {
                 Wrong network — tap to switch
               </button>
             ) : (
-              <ConnectedWalletPanel
-                address={account.address as `0x${string}`}
-                ensName={account.ensName}
-                chainName={chain.name ?? 'Unknown chain'}
-                chainId={chain.id}
-                onOpenAccount={openAccountModal}
-              />
+              <div className={expanded ? 'w-full' : 'w-auto'}>
+                <ConnectedWalletCompact
+                  address={account.address as `0x${string}`}
+                  ensName={account.ensName}
+                  onOpenAccount={openAccountModal}
+                  expanded={expanded}
+                  onToggle={() => setExpanded((v) => !v)}
+                />
+                {expanded ? (
+                  <div className="mt-2">
+                    <ConnectedWalletPanel
+                      address={account.address as `0x${string}`}
+                      ensName={account.ensName}
+                      chainName={chain.name ?? 'Unknown chain'}
+                      chainId={chain.id}
+                      onOpenAccount={openAccountModal}
+                      hideAddressRow
+                    />
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         );

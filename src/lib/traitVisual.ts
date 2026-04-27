@@ -28,6 +28,59 @@ export function findTraitValue(
   return String(hit.value).trim();
 }
 
+/**
+ * Merge OpenSea listing traits into on-chain metadata traits. Same `trait_type` (case-insensitive)
+ * keeps the **chain** row so `tokenURI` remains authoritative when both exist.
+ */
+export function mergeTraitAttrsPreferChain(
+  chainAttrs: TraitAttr[],
+  fillerAttrs: TraitAttr[] | undefined,
+): TraitAttr[] {
+  if (!fillerAttrs?.length) return chainAttrs;
+  const seen = new Set<string>();
+  for (const a of chainAttrs) {
+    const lab = traitTypeLabel(a);
+    if (lab) seen.add(lab.toLowerCase());
+  }
+  const out = [...chainAttrs];
+  for (const a of fillerAttrs) {
+    const lab = traitTypeLabel(a);
+    if (!lab) continue;
+    const lc = lab.toLowerCase();
+    if (seen.has(lc)) continue;
+    out.push(a);
+    seen.add(lc);
+  }
+  return out;
+}
+
+/**
+ * TBA backpack pet: OpenSea `traits` often has the correct Tribe while `tokenURI` JSON can load
+ * later with a generic / stale / unparseable Tribe. `mergeTraitAttrsPreferChain` keeps chain rows,
+ * which caused a **flash** of correct OS tint then a revert. When OS Tribe resolves to a known
+ * skin hex, **use that row** instead of any chain Tribe row.
+ */
+export function mergeCompanionChainAndOpenSeaTraits(
+  chainAttrs: TraitAttr[],
+  osAttrs: TraitAttr[] | undefined,
+): TraitAttr[] {
+  const base = mergeTraitAttrsPreferChain(chainAttrs, osAttrs);
+  if (!osAttrs?.length) return base;
+
+  const osTribe = osAttrs.find((a) => /\btribe\b/i.test(traitTypeLabel(a) ?? ''));
+  if (!osTribe || osTribe.value == null) return base;
+  const osHex = resolveTribeSkinFromValue(String(osTribe.value).trim());
+  if (!osHex) return base;
+
+  const withoutTribe = base.filter((a) => !/\btribe\b/i.test(traitTypeLabel(a) ?? ''));
+  const lab = traitTypeLabel(osTribe) ?? 'Tribe';
+  withoutTribe.push({
+    trait_type: lab,
+    value: typeof osTribe.value === 'number' ? osTribe.value : String(osTribe.value).trim(),
+  });
+  return withoutTribe;
+}
+
 /** Hoodrats metadata uses `Null` for empty clothing / ears / eyewear slots. */
 const SHIRTLESS_VALUE =
   /^(none|null|n\/a|na|shirtless|no shirt|no\s*clothing|bare(chest)?|naked)$/i;
@@ -66,11 +119,40 @@ export function tribeKey(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z]/g, '');
 }
 
+/**
+ * Map a metadata tribe value string to `TRIBE_SKIN_HEX`. Handles suffixes like
+ * "Jibarats Tribe" (letters-only `jibaratstribe` would otherwise miss `jibarats`).
+ */
+export function resolveTribeSkinFromValue(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const k0 = tribeKey(trimmed);
+  if (TRIBE_SKIN_HEX[k0]) return TRIBE_SKIN_HEX[k0];
+
+  const tokens = trimmed
+    .toLowerCase()
+    .split(/[^a-z]+/g)
+    .filter((t) => t.length > 0);
+  for (const t of tokens) {
+    if (TRIBE_SKIN_HEX[t]) return TRIBE_SKIN_HEX[t];
+  }
+
+  let bestLen = 0;
+  let bestHex: string | null = null;
+  for (const key of Object.keys(TRIBE_SKIN_HEX)) {
+    if (k0.includes(key) && key.length > bestLen) {
+      bestLen = key.length;
+      bestHex = TRIBE_SKIN_HEX[key]!;
+    }
+  }
+  return bestHex;
+}
+
 export function tribeSkinHex(attributes: TraitAttr[] | undefined): string | null {
-  const raw = findTraitValue(attributes, /^tribe$/i);
+  const raw = findTraitValue(attributes, /\btribe\b/i);
   if (!raw) return null;
-  const key = tribeKey(raw);
-  return TRIBE_SKIN_HEX[key] ?? null;
+  return resolveTribeSkinFromValue(raw);
 }
 
 /** Normalise glTF mesh names for comparisons (exporters vary in casing). */

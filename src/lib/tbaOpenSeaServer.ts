@@ -4,12 +4,20 @@ function osHeaders(key: string): Record<string, string> {
   return { accept: 'application/json', 'x-api-key': key };
 }
 
+/** OpenSea account-NFT `traits[]` rows (indexed separately from on-chain `tokenURI` JSON). */
+export type TbaBackpackTraitRow = {
+  trait_type: string;
+  value: string | number;
+};
+
 export type TbaBackpackNft = {
   contract: string;
   tokenId: string;
   name?: string;
   image?: string;
   openseaUrl?: string;
+  /** Present on OpenSea v2 account NFTs — use when IPFS metadata omits `attributes`. */
+  traits?: TbaBackpackTraitRow[];
 };
 
 function mapAccountNft(nft: Record<string, unknown>): TbaBackpackNft | null {
@@ -38,7 +46,32 @@ function mapAccountNft(nft: Record<string, unknown>): TbaBackpackNft | null {
   const name = typeof nft.name === 'string' && nft.name.trim() ? nft.name.trim() : undefined;
   const openseaUrl = typeof nft.opensea_url === 'string' ? nft.opensea_url : undefined;
 
-  return { contract, tokenId, name, image, openseaUrl };
+  let traits: TbaBackpackTraitRow[] | undefined;
+  const traitsRaw = nft.traits;
+  if (Array.isArray(traitsRaw)) {
+    const rows: TbaBackpackTraitRow[] = [];
+    for (const item of traitsRaw) {
+      if (!item || typeof item !== 'object') continue;
+      const tr = item as Record<string, unknown>;
+      const tt =
+        typeof tr.trait_type === 'string'
+          ? tr.trait_type.trim()
+          : typeof tr.traitType === 'string'
+            ? tr.traitType.trim()
+            : '';
+      if (!tt) continue;
+      const v = tr.value;
+      if (v == null) continue;
+      if (typeof v === 'string' && !v.trim()) continue;
+      rows.push({
+        trait_type: tt,
+        value: typeof v === 'number' ? v : String(v).trim(),
+      });
+    }
+    if (rows.length) traits = rows;
+  }
+
+  return { contract, tokenId, name, image, openseaUrl, traits };
 }
 
 /**

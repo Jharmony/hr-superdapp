@@ -1,13 +1,13 @@
-import { useAnimations, useGLTF, useKeyboardControls } from '@react-three/drei';
+import { Billboard, Html, useAnimations, useGLTF, useKeyboardControls } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import {
   applyTraitAttributesToScene,
   disposeColoredHoodratScene,
 } from '../../lib/hoodratTraitApplyThree';
-import type { TraitAttr } from '../../lib/traitVisual';
+import { deriveTraitVisuals, findTraitValue, type TraitAttr } from '../../lib/traitVisual';
 import { preferTurboGatewayUrl } from '../../lib/arweaveGateways';
 import { resolvePlayerXZ, type XZRect } from './collision';
 import { sampleWalkableTerrainY } from './urTerrainGround';
@@ -43,7 +43,57 @@ const COMPANION_LOCAL_Z = -0.02;
 /** UR rift only: `terrainGround` is set; lift pet in body space so knees/feet read on the street. Cyber omits `terrainGround` — unchanged. */
 const UR_RIFT_COMPANION_LOCAL_Y_LIFT = 0.26;
 
+/** Initial main-tag Y before bbox measure (fallback). */
+const DEFAULT_PLAYER_TRIBE_TAG_Y = 2.45;
+/** Extra lift above the pet bbox top so it clears the hood/head clearly. */
+const COMPANION_TRIBE_TAG_Y_PAD = 2.7;
+
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
+
+function TribeNameBillboard({
+  text,
+  accentHex,
+  y,
+  variant = 'player',
+}: {
+  text: string;
+  accentHex: string | null;
+  y: number;
+  /** Pet uses smaller type + lower `distanceFactor` so the tag matches its scale. */
+  variant?: 'player' | 'companion';
+}) {
+  const border =
+    accentHex && /^#[0-9a-f]{3,8}$/i.test(accentHex) ? accentHex : 'rgba(244,244,245,0.35)';
+  const isPet = variant === 'companion';
+  const distanceFactor = isPet ? 4.5 : 11;
+  const divClass = isPet
+    ? 'whitespace-nowrap rounded border px-2 py-0.5 text-[14px] font-bold uppercase tracking-wide shadow-md backdrop-blur-sm'
+    : 'whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide shadow-lg backdrop-blur-sm';
+  const glow = isPet ? 4 : 14;
+  return (
+    <Billboard follow position={[0, y, 0]}>
+      <Html
+        center
+        distanceFactor={distanceFactor}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+        zIndexRange={[200, 0]}
+      >
+        <div
+          className={divClass}
+          style={{
+            borderColor: border,
+            background: 'rgba(10,8,12,0.82)',
+            color: '#f4f4f5',
+            boxShadow: accentHex ? `0 0 ${glow}px ${accentHex}` : undefined,
+            textShadow: '0 1px 2px rgba(0,0,0,0.9)',
+          }}
+        >
+          {text}
+        </div>
+      </Html>
+    </Billboard>
+  );
+}
 
 type ResolvedClips = {
   idle: string | undefined;
@@ -74,6 +124,9 @@ const tmpRight = new THREE.Vector3();
 const tmpMove = new THREE.Vector3();
 const tmpCamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _footAlignBox = new THREE.Box3();
+const _tagBox = new THREE.Box3();
+const _tagInv = new THREE.Matrix4();
+const _tagVec = new THREE.Vector3();
 
 export type HoodratPortalConfig = {
   x: number;
@@ -109,6 +162,8 @@ export function HoodratPlayer({
   traitAttributes,
   /** First Hoodrat NFT in the active rat’s Tokenbound backpack — pet-scale companion in-world. */
   companionTraitAttributes,
+  /** Same id as backpack `tokenURI` fetch; stabilises companion GLB remounts when traits stream in. */
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -130,6 +185,7 @@ export function HoodratPlayer({
    */
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const gltf = useGLTF(MODEL_URL);
   const traitDecorKey =
@@ -142,16 +198,36 @@ export function HoodratPlayer({
     return c;
   }, [gltf.scene, traitDecorKey]);
 
-  const companionDecorKey =
-    companionTraitAttributes === undefined
-      ? '__no_companion__'
-      : JSON.stringify(companionTraitAttributes);
+  /** Token + derived tint/shirtless only — avoids remounting on every metadata array churn (fixes foot offset + flicker). */
+  const companionSceneMemoKey = useMemo(() => {
+    if (companionTraitAttributes === undefined) return '__no_companion__';
+    const v = deriveTraitVisuals(companionTraitAttributes);
+    const id = companionTokenId ?? '—';
+    return `${id}|${v.hideTopClothing ? 1 : 0}|${v.skinTintHex ?? 'none'}`;
+  }, [companionTraitAttributes, companionTokenId]);
+
+  const mainTribeTag = useMemo(() => {
+    if (traitAttributes === undefined) return null;
+    const name = findTraitValue(traitAttributes, /\btribe\b/i);
+    if (!name) return null;
+    return { name, accentHex: deriveTraitVisuals(traitAttributes).skinTintHex };
+  }, [traitDecorKey, traitAttributes]);
+
+  const companionTribeTag = useMemo(() => {
+    if (companionTraitAttributes === undefined) return null;
+    const name = findTraitValue(companionTraitAttributes, /\btribe\b/i);
+    if (!name) return null;
+    return { name, accentHex: deriveTraitVisuals(companionTraitAttributes).skinTintHex };
+  }, [companionSceneMemoKey, companionTraitAttributes]);
+
+  // Remount only when visual fingerprint changes — avoids dispose/layout thrash when traits array churns.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- companionTraitAttributes read at last key change only
   const companionScene = useMemo(() => {
     if (companionTraitAttributes === undefined) return null;
     const c = SkeletonUtils.clone(gltf.scene);
     applyTraitAttributesToScene(c, companionTraitAttributes);
     return c;
-  }, [gltf.scene, companionDecorKey]);
+  }, [gltf.scene, companionSceneMemoKey]);
 
   useEffect(() => {
     return () => {
@@ -162,12 +238,12 @@ export function HoodratPlayer({
   }, [traitAttributes, worldScene]);
 
   useEffect(() => {
+    const scene = companionScene;
+    if (!scene) return;
     return () => {
-      if (companionTraitAttributes !== undefined && companionScene) {
-        disposeColoredHoodratScene(companionScene);
-      }
+      disposeColoredHoodratScene(scene);
     };
-  }, [companionTraitAttributes, companionScene]);
+  }, [companionScene]);
 
   const { actions, mixer } = useAnimations(gltf.animations, worldScene);
   const { camera, gl } = useThree();
@@ -175,6 +251,8 @@ export function HoodratPlayer({
 
   const clips = useMemo(() => resolveClips(gltf.animations), [gltf.animations]);
   const companionGroupRef = useRef<THREE.Group>(null);
+  /** Only the cloned companion scene — layout clears this, not the whole `companionGroupRef` (tags stay). */
+  const companionRigMountRef = useRef<THREE.Group>(null);
   const { actions: companionActions, mixer: companionMixer } = useAnimations(
     gltf.animations,
     companionGroupRef,
@@ -197,6 +275,12 @@ export function HoodratPlayer({
   const orbitPitch = useRef(0.3);
   const lookPitch = useRef(0);
   const firstPersonRef = useRef(false);
+  /** Third-person only — hide floating tribe tags in FP (same as body visibility). */
+  const [showNameTags, setShowNameTags] = useState(true);
+  /** Y in `visualRef` space — from main rig bbox top + margin. */
+  const [playerTribeTagY, setPlayerTribeTagY] = useState(DEFAULT_PLAYER_TRIBE_TAG_Y);
+  /** Y in `companionRigMountRef` space — from pet bbox top + margin. */
+  const [companionTribeTagY, setCompanionTribeTagY] = useState(0);
   const prevActionRef = useRef<THREE.AnimationAction | null>(null);
   const locoRef = useRef<LocoMode>('idle');
   const pointerLockedRef = useRef(false);
@@ -286,6 +370,7 @@ export function HoodratPlayer({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat || e.code !== 'KeyV') return;
       firstPersonRef.current = !firstPersonRef.current;
+      setShowNameTags(!firstPersonRef.current);
       onViewModeChange?.(firstPersonRef.current ? 'fp' : 'tp');
     };
     window.addEventListener('keydown', onKeyDown);
@@ -311,6 +396,17 @@ export function HoodratPlayer({
     }
   }, []);
 
+  const refreshPlayerTribeTagHeight = useCallback(() => {
+    const vis = visualRef.current;
+    if (!vis) return;
+    worldScene.updateMatrixWorld(true);
+    vis.updateMatrixWorld(true);
+    const wb = new THREE.Box3().setFromObject(worldScene, true);
+    _tagInv.copy(vis.matrixWorld).invert();
+    _tagBox.copy(wb).applyMatrix4(_tagInv);
+    setPlayerTribeTagY(_tagBox.max.y + 0.2);
+  }, [worldScene]);
+
   useLayoutEffect(() => {
     const scene = worldScene;
     scene.scale.setScalar(modelScale);
@@ -318,17 +414,20 @@ export function HoodratPlayer({
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene);
     scene.position.y = -box.min.y - feetSink;
+    scene.updateMatrixWorld(true);
+    refreshPlayerTribeTagHeight();
     if (snapFeetToGround) {
       footGroundSnapDoneRef.current = false;
       footGroundSnapFrameRef.current = 0;
     }
-  }, [feetSink, modelScale, snapFeetToGround, worldScene]);
+  }, [feetSink, modelScale, refreshPlayerTribeTagHeight, snapFeetToGround, worldScene]);
 
   useLayoutEffect(() => {
-    const g = companionGroupRef.current;
-    if (!g) return;
-    for (let i = g.children.length - 1; i >= 0; i--) {
-      g.remove(g.children[i]!);
+    const mount = companionRigMountRef.current;
+    if (!mount) return;
+    for (let i = mount.children.length - 1; i >= 0; i--) {
+      const ch = mount.children[i]!;
+      if (ch.userData?.hoodratCompanionClone) mount.remove(ch);
     }
     companionRootBonesRef.current = [];
     if (companionScene) {
@@ -362,7 +461,27 @@ export function HoodratPlayer({
         if (first) roots.push({ bone: first, base: { x: first.position.x, y: first.position.y, z: first.position.z } });
       }
       companionRootBonesRef.current = roots;
-      g.add(c);
+      c.userData.hoodratCompanionClone = true;
+      mount.add(c);
+      mount.updateMatrixWorld(true);
+      c.updateMatrixWorld(true);
+      const wb = new THREE.Box3().setFromObject(c, true);
+      // Tag is parented under `companionGroupRef` (sibling of mount). Transform mesh top from
+      // world → group local — `mount.matrixWorld` alone was wrong here (tag read as ~feet).
+      const grp = companionGroupRef.current;
+      if (grp) {
+        grp.updateMatrixWorld(true);
+        _tagVec.set((wb.min.x + wb.max.x) * 0.5, wb.max.y, (wb.min.z + wb.max.z) * 0.5);
+        grp.worldToLocal(_tagVec);
+        setCompanionTribeTagY(_tagVec.y + COMPANION_TRIBE_TAG_Y_PAD);
+      } else {
+        mount.updateMatrixWorld(true);
+        _tagVec.set((wb.min.x + wb.max.x) * 0.5, wb.max.y, (wb.min.z + wb.max.z) * 0.5);
+        mount.worldToLocal(_tagVec);
+        setCompanionTribeTagY(_tagVec.y + COMPANION_TRIBE_TAG_Y_PAD);
+      }
+    } else {
+      setCompanionTribeTagY(0);
     }
   }, [companionScene, feetSink]);
 
@@ -610,6 +729,7 @@ export function HoodratPlayer({
           const err = targetSoleY - _footAlignBox.min.y;
           if (Number.isFinite(err) && Math.abs(err) < 6) {
             worldScene.position.y += err;
+            refreshPlayerTribeTagHeight();
           }
         }
         footGroundSnapDoneRef.current = true;
@@ -717,7 +837,25 @@ export function HoodratPlayer({
       />
       <group ref={visualRef}>
         <primitive object={worldScene} />
-        <group ref={companionGroupRef} />
+        {showNameTags && mainTribeTag && (
+          <TribeNameBillboard
+            variant="player"
+            text={mainTribeTag.name}
+            accentHex={mainTribeTag.accentHex}
+            y={playerTribeTagY}
+          />
+        )}
+        <group ref={companionGroupRef}>
+          <group ref={companionRigMountRef} />
+          {showNameTags && companionTribeTag && companionScene && companionTribeTagY > 0.01 && (
+            <TribeNameBillboard
+              variant="companion"
+              text={companionTribeTag.name}
+              accentHex={companionTribeTag.accentHex}
+              y={companionTribeTagY}
+            />
+          )}
+        </group>
       </group>
     </group>
   );

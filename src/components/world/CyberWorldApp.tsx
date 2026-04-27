@@ -16,6 +16,7 @@ import type { TraitAttr } from '../../lib/traitVisual';
 import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
+import { MintDockChrome } from '../mint/MintPanel';
 import { WorldTbaHud } from './WorldTbaHud';
 import { WorldWalletHud } from './WorldWalletHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
@@ -177,11 +178,13 @@ function WorldScene({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   return (
     <>
@@ -252,6 +255,7 @@ function WorldScene({
           snapFeetToGround
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
           portal={{
             x: PORTAL_X,
             z: PORTAL_Z,
@@ -279,11 +283,13 @@ function WorldCanvas({
   onViewModeChange,
   traitAttributes,
   companionTraitAttributes,
+  companionTokenId,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
   traitAttributes?: TraitAttr[];
   companionTraitAttributes?: TraitAttr[];
+  companionTokenId?: number | null;
 }) {
   const dpr = useMemo((): [number, number] => [1, Math.min(2, window.devicePixelRatio || 1)], []);
 
@@ -310,6 +316,7 @@ function WorldCanvas({
           onViewModeChange={onViewModeChange}
           traitAttributes={traitAttributes}
           companionTraitAttributes={companionTraitAttributes}
+          companionTokenId={companionTokenId}
         />
       </KeyboardControls>
     </Canvas>
@@ -318,7 +325,7 @@ function WorldCanvas({
 
 function CyberWorldExperience() {
   const { traitAttributes, activeTokenId } = useActiveHoodratTraitAttributes();
-  const { companionTraitAttributes } = useBackpackWorldVisuals(activeTokenId);
+  const { companionTraitAttributes, companionTokenId } = useBackpackWorldVisuals(activeTokenId);
   const [locked, setLocked] = useState(false);
   const [viewMode, setViewMode] = useState<'tp' | 'fp'>('tp');
 
@@ -341,6 +348,7 @@ function CyberWorldExperience() {
 
       <WorldTbaHud activeTokenId={activeTokenId} />
       <WorldWalletHud />
+      <MintDockChrome detailsHref="/#mint" zIndexClass="z-[229]" />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary
@@ -360,6 +368,7 @@ function CyberWorldExperience() {
             onViewModeChange={setViewMode}
             traitAttributes={traitAttributes}
             companionTraitAttributes={companionTraitAttributes}
+            companionTokenId={companionTokenId}
           />
         </AppErrorBoundary>
       </div>
