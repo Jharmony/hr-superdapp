@@ -89,45 +89,31 @@ const CYBER_OBSTACLE_XZ: XZRect[] = [
 ];
 
 function CyberRiftPortal() {
-  const gltf = useGLTF(PORTAL_MODEL_URL);
-  const portalRoot = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
-
-  useLayoutEffect(() => {
-    const root = portalRoot;
-    root.position.set(0, 0, 0);
-    root.scale.setScalar(PORTAL_VISUAL_SCALE);
-    root.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(root);
-    root.position.y = -box.min.y - PORTAL_GROUND_BIAS;
-  }, [portalRoot]);
-
-  useEffect(() => {
-    portalRoot.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-        o.frustumCulled = false;
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const raw of mats) {
-          const m = raw as THREE.MeshStandardMaterial;
-          if (m?.isMeshStandardMaterial) {
-            m.emissiveIntensity = Math.max(m.emissiveIntensity ?? 0, 0.45);
-          }
-        }
-      }
-    });
-  }, [portalRoot]);
-
+  // Procedural fallback portal so navigation never disappears if the GLB is missing.
+  // The old GLB path was `/models/portal.glb`; local repos often forget to ship it.
   return (
-    <group position={[PORTAL_X, GROUND_Y, PORTAL_Z]}>
-      <pointLight
-        position={[0, 4.2, 0]}
-        intensity={8}
-        distance={22}
-        decay={1.85}
-        color="#f0abfc"
-      />
-      <primitive object={portalRoot} />
+    <group position={[PORTAL_X, GROUND_Y + 0.02, PORTAL_Z]}>
+      <pointLight position={[0, 2.8, 0]} intensity={10} distance={26} decay={1.9} color="#f0abfc" />
+      <mesh position={[0, 1.35, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3.1, 3.0, 0.45]} />
+        <meshStandardMaterial
+          color="#07070a"
+          emissive="#d946ef"
+          emissiveIntensity={0.85}
+          metalness={0.25}
+          roughness={0.35}
+        />
+      </mesh>
+      <mesh position={[0, 1.35, 0.03]} castShadow={false} receiveShadow={false}>
+        <boxGeometry args={[2.25, 2.25, 0.1]} />
+        <meshStandardMaterial
+          color="#000000"
+          emissive="#22d3ee"
+          emissiveIntensity={0.55}
+          transparent
+          opacity={0.22}
+        />
+      </mesh>
     </group>
   );
 }

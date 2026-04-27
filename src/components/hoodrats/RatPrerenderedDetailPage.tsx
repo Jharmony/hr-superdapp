@@ -71,7 +71,19 @@ export function RatPrerenderedDetailPage({
                 className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
                 loading="lazy"
                 allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
+                referrerPolicy="no-referrer"
               />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs">
+              <span className="truncate text-zinc-500">Interactive view</span>
+              <a
+                href={anim}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 font-semibold text-zinc-200 transition hover:border-lime-500/35 hover:text-lime-200"
+              >
+                Open in new tab
+              </a>
             </div>
           ) : imgUrl ? (
             <FallbackImage
