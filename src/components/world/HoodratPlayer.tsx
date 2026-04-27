@@ -36,8 +36,8 @@ const MODEL_URL =
   '/models/hoodrats.glb';
 
 /** Local offset under `visualRef` (rat’s body space): beside the right foot, on the floor plane. */
-const COMPANION_LOCAL_X = 0.74;
-const COMPANION_LOCAL_Y = -0.78;
+const COMPANION_LOCAL_X = 0.96;
+const COMPANION_LOCAL_Y = -0.88;
 const COMPANION_LOCAL_Z = -0.02;
 
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
