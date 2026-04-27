@@ -5,7 +5,6 @@ import { hoodratsChainId } from '../../lib/chain';
 import type { NftMetadata } from '../../lib/metadata';
 import { resolveUri } from '../../lib/uri';
 import { FallbackImage } from '../media/FallbackImage';
-import { IframeWithFallback } from '../media/IframeWithFallback';
 
 const SHOWCASE_TOKEN_ID = Number(
   (import.meta.env.PUBLIC_TOKENBOUND_DEMO_TOKEN_ID as string | undefined)?.trim() ||
@@ -106,10 +105,12 @@ export function TokenboundShowcasePanel() {
           </div>
         ) : anim ? (
           <div className="relative mx-auto aspect-square w-full max-w-[min(100%,560px)] overflow-hidden bg-black">
-            <IframeWithFallback
+            <iframe
               title={`Tokenbound preview ${tokenId}`}
               src={anim}
               className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
+              loading="lazy"
+              allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
             />
           </div>
         ) : img ? (
