@@ -11,7 +11,16 @@ import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
 
 /** Thumbnail + links; holders can open an inline 3D preview and download a tinted `.glb`. */
-export function OwnedRatCard({ tokenId }: { tokenId: number }) {
+export function OwnedRatCard({
+  tokenId,
+  isActive = false,
+  onSetActive,
+}: {
+  tokenId: number;
+  /** Shown when this token is the wallet’s active rat for `/world/` 3D. */
+  isActive?: boolean;
+  onSetActive?: () => void;
+}) {
   const [studioOpen, setStudioOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportErr, setExportErr] = useState<string | null>(null);
@@ -85,6 +94,29 @@ export function OwnedRatCard({ tokenId }: { tokenId: number }) {
               No img
             </div>
           )}
+          {onSetActive && isActive ? (
+            <span
+              className="pointer-events-none absolute left-1 top-1 z-10 rounded border border-lime-400/55 bg-zinc-950/90 px-1 py-px text-[7px] font-bold uppercase tracking-wide text-lime-300 shadow-sm backdrop-blur-sm"
+              aria-hidden
+            >
+              Active
+            </span>
+          ) : null}
+          {onSetActive && !isActive && !loading && !errMsg ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSetActive();
+              }}
+              title="Set as active rat for 3D worlds"
+              aria-label="Set as active rat for 3D worlds"
+              className="absolute left-1 top-1 z-10 flex h-6 min-w-[1.35rem] items-center justify-center rounded border border-zinc-600/90 bg-zinc-950/90 px-1 text-[11px] font-bold leading-none text-lime-300 shadow-md backdrop-blur-sm transition hover:border-lime-500/50 hover:bg-zinc-900 hover:text-lime-200"
+            >
+              +
+            </button>
+          ) : null}
         </div>
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 p-4">
           <div>

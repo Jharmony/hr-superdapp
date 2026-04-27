@@ -1,3 +1,4 @@
+import { NavActiveRatChip } from './NavActiveRatChip';
 import { WalletConnectButton } from './WalletConnectButton';
 
 const links: { href: string; label: string; ext?: true }[] = [
@@ -15,11 +16,11 @@ const links: { href: string; label: string; ext?: true }[] = [
 export function SiteNav() {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-        <a href="/" className="font-black tracking-tight text-lime-200">
+      <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 md:gap-4 md:py-3">
+        <a href="/" className="shrink-0 font-black tracking-tight text-lime-200">
           Hoodrats <span className="text-zinc-500">Super-Dapp</span>
         </a>
-        <nav className="hidden items-center gap-6 text-sm text-zinc-400 md:flex">
+        <nav className="hidden min-w-0 flex-1 items-center justify-center gap-6 text-sm text-zinc-400 md:flex">
           {links.map((l) => (
             <a
               key={l.href}
@@ -31,7 +32,10 @@ export function SiteNav() {
             </a>
           ))}
         </nav>
-        <WalletConnectButton />
+        <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-2.5">
+          <WalletConnectButton />
+          <NavActiveRatChip />
+        </div>
       </div>
       <nav className="flex flex-wrap gap-x-4 gap-y-2 border-t border-zinc-800/80 px-4 py-2 text-xs text-zinc-500 md:hidden">
         {links.map((l) => (

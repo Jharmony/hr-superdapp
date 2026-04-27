@@ -3,6 +3,11 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import {
+  applyTraitAttributesToScene,
+  disposeColoredHoodratScene,
+} from '../../lib/hoodratTraitApplyThree';
+import type { TraitAttr } from '../../lib/traitVisual';
 import { resolvePlayerXZ, type XZRect } from './collision';
 import { sampleWalkableTerrainY } from './urTerrainGround';
 import {
@@ -85,6 +90,9 @@ export function HoodratPlayer({
    */
   terrainGround,
   portal,
+  traitAttributes,
+  /** First Hoodrat NFT in the active rat’s Tokenbound backpack — pet-scale companion in-world. */
+  companionTraitAttributes,
 }: {
   onLockChange: (locked: boolean) => void;
   onViewModeChange?: (mode: 'tp' | 'fp') => void;
@@ -100,14 +108,66 @@ export function HoodratPlayer({
   footSkinEpsilon?: number;
   terrainGround?: { root: THREE.Object3D; minY: number; maxY: number; soleBias?: number };
   portal: HoodratPortalConfig | null;
+  /**
+   * When set (including `[]`), applies the same tribe / skin tint and clothing visibility as
+   * `TraitHoodratPreview` / My Hoodrats GLB export. Omit for the default untinted rig.
+   */
+  traitAttributes?: TraitAttr[];
+  companionTraitAttributes?: TraitAttr[];
 }) {
   const gltf = useGLTF(MODEL_URL);
-  const worldScene = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
+  const traitDecorKey =
+    traitAttributes === undefined ? '__default__' : JSON.stringify(traitAttributes);
+  const worldScene = useMemo(() => {
+    const c = SkeletonUtils.clone(gltf.scene);
+    if (traitAttributes !== undefined) {
+      applyTraitAttributesToScene(c, traitAttributes);
+    }
+    return c;
+  }, [gltf.scene, traitDecorKey]);
+
+  const companionDecorKey =
+    companionTraitAttributes === undefined
+      ? '__no_companion__'
+      : JSON.stringify(companionTraitAttributes);
+  const companionScene = useMemo(() => {
+    if (companionTraitAttributes === undefined) return null;
+    const c = SkeletonUtils.clone(gltf.scene);
+    applyTraitAttributesToScene(c, companionTraitAttributes);
+    return c;
+  }, [gltf.scene, companionDecorKey]);
+
+  useEffect(() => {
+    return () => {
+      if (traitAttributes !== undefined) {
+        disposeColoredHoodratScene(worldScene);
+      }
+    };
+  }, [traitAttributes, worldScene]);
+
+  useEffect(() => {
+    return () => {
+      if (companionTraitAttributes !== undefined && companionScene) {
+        disposeColoredHoodratScene(companionScene);
+      }
+    };
+  }, [companionTraitAttributes, companionScene]);
+
   const { actions, mixer } = useAnimations(gltf.animations, worldScene);
   const { camera, gl } = useThree();
   const [, get] = useKeyboardControls();
 
   const clips = useMemo(() => resolveClips(gltf.animations), [gltf.animations]);
+  const companionGroupRef = useRef<THREE.Group>(null);
+  const { actions: companionActions, mixer: companionMixer } = useAnimations(
+    gltf.animations,
+    companionGroupRef,
+  );
+  const companionBaseYRef = useRef<number>(0);
+  const companionRootBonesRef = useRef<
+    { bone: THREE.Bone; base: { x: number; y: number; z: number } }[]
+  >([]);
+  const prevCompanionActionRef = useRef<THREE.AnimationAction | null>(null);
   const groupRef = useRef<THREE.Group>(null);
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
@@ -137,6 +197,13 @@ export function HoodratPlayer({
     prevActionRef.current?.fadeOut(0.2);
     next.reset().fadeIn(0.2).play();
     prevActionRef.current = next;
+  }, []);
+
+  const fadeToCompanion = useCallback((next: THREE.AnimationAction | null | undefined) => {
+    if (!next) return;
+    prevCompanionActionRef.current?.fadeOut(0.2);
+    next.reset().fadeIn(0.2).play();
+    prevCompanionActionRef.current = next;
   }, []);
 
   useLayoutEffect(() => {
@@ -234,6 +301,55 @@ export function HoodratPlayer({
     }
   }, [feetSink, modelScale, snapFeetToGround, worldScene]);
 
+  useLayoutEffect(() => {
+    const g = companionGroupRef.current;
+    if (!g) return;
+    for (let i = g.children.length - 1; i >= 0; i--) {
+      g.remove(g.children[i]!);
+    }
+    companionRootBonesRef.current = [];
+    if (companionScene) {
+      const c = companionScene;
+      c.scale.setScalar(1);
+      c.position.set(0, 0, 0);
+      c.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(c);
+      c.position.y = -box.min.y - feetSink;
+      companionBaseYRef.current = c.position.y;
+      // Root-motion is often authored on hips/root bones. Cache all likely candidates and clamp X/Z.
+      const roots: { bone: THREE.Bone; base: { x: number; y: number; z: number } }[] = [];
+      c.traverse((o) => {
+        if (!(o instanceof THREE.Bone)) return;
+        const n = o.name.toLowerCase();
+        if (n.includes('hips') || n.includes('root')) {
+          roots.push({ bone: o, base: { x: o.position.x, y: o.position.y, z: o.position.z } });
+        }
+      });
+      // Fallback: clamp the first bone if no named roots found.
+      if (roots.length === 0) {
+        let first: THREE.Bone | null = null;
+        c.traverse((o) => {
+          if (first) return;
+          if (o instanceof THREE.Bone) first = o;
+        });
+        if (first) roots.push({ bone: first, base: { x: first.position.x, y: first.position.y, z: first.position.z } });
+      }
+      companionRootBonesRef.current = roots;
+      g.add(c);
+    }
+  }, [companionScene, feetSink]);
+
+  useEffect(() => {
+    if (!companionScene || !companionActions || !clips.idle || !companionActions[clips.idle]) {
+      return;
+    }
+    const idle = companionActions[clips.idle]!;
+    idle.reset().fadeIn(0.18).play();
+    return () => {
+      idle.fadeOut(0.12);
+    };
+  }, [companionScene, companionActions, clips.idle]);
+
   useEffect(() => {
     if (!actions || !clips.idle || !actions[clips.idle]) return;
     fadeTo(actions[clips.idle]);
@@ -241,6 +357,18 @@ export function HoodratPlayer({
 
   useFrame((_, dt) => {
     if (mixer) mixer.update(dt);
+    if (companionMixer && companionScene) companionMixer.update(dt);
+    // Companion clips include root-motion; clamp it so the pet never drifts away.
+    if (companionScene) {
+      companionScene.position.x = 0;
+      companionScene.position.z = 0;
+      companionScene.position.y = companionBaseYRef.current;
+      for (const { bone, base } of companionRootBonesRef.current) {
+        bone.position.x = base.x;
+        bone.position.z = base.z;
+        // keep authored vertical bounce (y) but prevent “walk away”
+      }
+    }
 
     const locked = pointerLockedRef.current;
     const { forward, back, left, right, run, jump } = get();
@@ -383,22 +511,63 @@ export function HoodratPlayer({
         act.setLoop(THREE.LoopOnce, 1);
         act.clampWhenFinished = true;
         fadeTo(act);
+        if (companionScene && clips.jump && companionActions?.[clips.jump]) {
+          const cAct = companionActions[clips.jump]!;
+          cAct.reset();
+          cAct.setLoop(THREE.LoopOnce, 1);
+          cAct.clampWhenFinished = true;
+          fadeToCompanion(cAct);
+        }
       } else if (targetLoco === 'run' && clips.run && actions?.[clips.run]) {
         const a = actions[clips.run]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.run && companionActions?.[clips.run]) {
+          const cA = companionActions[clips.run]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (targetLoco === 'walk' && clips.walk && actions?.[clips.walk]) {
         const a = actions[clips.walk]!;
         a.setLoop(THREE.LoopRepeat, Infinity);
         fadeTo(a);
+        if (companionScene && clips.walk && companionActions?.[clips.walk]) {
+          const cA = companionActions[clips.walk]!;
+          cA.setLoop(THREE.LoopRepeat, Infinity);
+          fadeToCompanion(cA);
+        }
       } else if (clips.idle && actions?.[clips.idle]) {
         fadeTo(actions[clips.idle]);
+        if (companionScene && clips.idle && companionActions?.[clips.idle]) {
+          fadeToCompanion(companionActions[clips.idle]);
+        }
       }
     }
 
     const p = playerPos.current;
     if (groupRef.current) {
       groupRef.current.position.copy(p);
+    }
+
+    const cg = companionGroupRef.current;
+    if (cg && companionScene) {
+      cg.visible = !firstPersonRef.current;
+      if (cg.visible) {
+        const ry = visualRef.current?.rotation.y ?? 0;
+        const sinY = Math.sin(ry);
+        const cosY = Math.cos(ry);
+        const fwdX = -sinY;
+        const fwdZ = -cosY;
+        const rightX = cosY;
+        const rightZ = -sinY;
+        cg.scale.setScalar(modelScale * 0.33);
+        cg.position.set(
+          p.x + rightX * 0.82 + fwdX * 0.26,
+          p.y,
+          p.z + rightZ * 0.82 + fwdZ * 0.26,
+        );
+        cg.rotation.y = ry;
+      }
     }
 
     if (
@@ -508,6 +677,7 @@ export function HoodratPlayer({
       <group ref={visualRef}>
         <primitive object={worldScene} />
       </group>
+      <group ref={companionGroupRef} />
     </group>
   );
 }
