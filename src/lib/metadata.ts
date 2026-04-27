@@ -8,7 +8,13 @@ export type NftMetadata = {
   description?: string;
   image?: string;
   animation_url?: string;
-  attributes?: { trait_type?: string; value?: string | number }[];
+  /** OpenSea-style `trait_type`; some gateways use `traitType` or `key` for the same field. */
+  attributes?: {
+    trait_type?: string;
+    traitType?: string;
+    key?: string;
+    value?: string | number;
+  }[];
 };
 
 /** Server / build-time only — used by Astro `getStaticPaths` prerender. */

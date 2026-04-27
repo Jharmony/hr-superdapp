@@ -2,13 +2,28 @@ import type { NftMetadata } from './metadata';
 
 export type TraitAttr = NonNullable<NftMetadata['attributes']>[number];
 
-/** Case-insensitive trait lookup by `trait_type` substring or regex. */
+/**
+ * Trait category label from metadata. Prefer `trait_type` (OpenSea / Hoodrats on-chain JSON)
+ * so existing tokens behave exactly as before; fall back to `traitType` / `key` when present.
+ */
+export function traitTypeLabel(a: TraitAttr | undefined): string | undefined {
+  if (!a) return undefined;
+  const raw = a.trait_type ?? a.traitType ?? a.key;
+  if (raw == null) return undefined;
+  const t = String(raw).trim();
+  return t || undefined;
+}
+
+/** Case-insensitive trait lookup by trait category label (substring or regex). */
 export function findTraitValue(
   attributes: TraitAttr[] | undefined,
   typeMatcher: RegExp,
 ): string | undefined {
   if (!attributes?.length) return undefined;
-  const hit = attributes.find((a) => a.trait_type && typeMatcher.test(String(a.trait_type).trim()));
+  const hit = attributes.find((a) => {
+    const label = traitTypeLabel(a);
+    return Boolean(label && typeMatcher.test(label));
+  });
   if (!hit || hit.value == null) return undefined;
   return String(hit.value).trim();
 }
