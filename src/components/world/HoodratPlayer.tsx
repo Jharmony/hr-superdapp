@@ -35,10 +35,10 @@ const MODEL_URL =
   preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
-/** Local offset under `visualRef` (rat’s body space): right + down so the pet’s feet read on the ground. */
-const COMPANION_LOCAL_X = 0.9;
-const COMPANION_LOCAL_Y = -0.36;
-const COMPANION_LOCAL_Z = 0.05;
+/** Local offset under `visualRef` (rat’s body space): beside the right foot, on the floor plane. */
+const COMPANION_LOCAL_X = 0.74;
+const COMPANION_LOCAL_Y = -0.78;
+const COMPANION_LOCAL_Z = -0.02;
 
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
 
