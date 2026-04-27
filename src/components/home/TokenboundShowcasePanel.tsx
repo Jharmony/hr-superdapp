@@ -51,7 +51,7 @@ export function TokenboundShowcasePanel() {
   });
 
   const loading = uriLoading || metaLoading;
-  const anim = meta?.animation_url?.trim();
+  const anim = meta?.animation_url ? resolveUri(meta.animation_url) : undefined;
   const img = meta?.image ? resolveUri(meta.image) : undefined;
   const title = meta?.name ?? `HOODRAT #${tokenId}`;
 
