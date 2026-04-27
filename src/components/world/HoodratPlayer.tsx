@@ -173,6 +173,8 @@ export function HoodratPlayer({
   const visualRef = useRef<THREE.Group>(null);
   const spotRef = useRef<THREE.SpotLight>(null);
   const spotTargetRef = useRef<THREE.Object3D>(null);
+  const keyLightRef = useRef<THREE.SpotLight>(null);
+  const keyTargetRef = useRef<THREE.Object3D>(null);
   const playerPos = useRef(
     new THREE.Vector3(initialXZ?.x ?? 0, groundY, initialXZ?.z ?? 0),
   );
@@ -286,6 +288,11 @@ export function HoodratPlayer({
     const tgt = spotTargetRef.current;
     if (spot && tgt) {
       spot.target = tgt;
+    }
+    const k = keyLightRef.current;
+    const kt = keyTargetRef.current;
+    if (k && kt) {
+      k.target = kt;
     }
   }, []);
 
@@ -557,15 +564,13 @@ export function HoodratPlayer({
         const ry = visualRef.current?.rotation.y ?? 0;
         const sinY = Math.sin(ry);
         const cosY = Math.cos(ry);
-        const fwdX = -sinY;
-        const fwdZ = -cosY;
         const rightX = cosY;
         const rightZ = -sinY;
         cg.scale.setScalar(modelScale * 0.33);
         cg.position.set(
-          p.x + rightX * 0.82 + fwdX * 0.26,
+          p.x + rightX * 0.72,
           p.y,
-          p.z + rightZ * 0.82 + fwdZ * 0.26,
+          p.z + rightZ * 0.72,
         );
         cg.rotation.y = ry;
       }
@@ -638,11 +643,26 @@ export function HoodratPlayer({
       camera.position.set(p.x + ox, p.y + oy, p.z + oz);
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
+
+    // Key light: sits near camera and aims at the player so the rat reads clearly.
+    const key = keyLightRef.current;
+    const kt = keyTargetRef.current;
+    if (key && kt) {
+      camera.getWorldDirection(tmpFwd);
+      tmpFwd.normalize();
+      key.position.set(
+        camera.position.x + tmpFwd.x * 0.35,
+        camera.position.y + 0.15,
+        camera.position.z + tmpFwd.z * 0.35,
+      );
+      kt.position.set(p.x, p.y + 1.05, p.z);
+    }
   });
 
   return (
     <group ref={groupRef}>
       <object3D ref={spotTargetRef} position={[0, 0.72, 0.28]} />
+      <object3D ref={keyTargetRef} position={[0, 1.05, 0]} />
       <spotLight
         ref={spotRef}
         position={[-3.6, 4.6, 3.4]}
@@ -652,6 +672,17 @@ export function HoodratPlayer({
         distance={52}
         decay={1.82}
         color="#e6d8c8"
+        castShadow={false}
+      />
+      <spotLight
+        ref={keyLightRef}
+        position={[0, 2.2, 4.2]}
+        angle={0.75}
+        penumbra={0.9}
+        intensity={32}
+        distance={18}
+        decay={1.7}
+        color="#fff3e6"
         castShadow={false}
       />
       <pointLight
