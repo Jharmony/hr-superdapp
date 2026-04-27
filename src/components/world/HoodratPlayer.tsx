@@ -587,6 +587,8 @@ export function HoodratPlayer({
           const err = targetSoleY - _footAlignBox.min.y;
           if (Number.isFinite(err) && Math.abs(err) < 6) {
             worldScene.position.y += err;
+            // Keep companion feet aligned with the same ground snap correction.
+            companionBaseYRef.current += err;
           }
         }
         footGroundSnapDoneRef.current = true;
