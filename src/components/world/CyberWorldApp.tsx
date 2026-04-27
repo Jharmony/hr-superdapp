@@ -6,11 +6,10 @@ import {
   useGLTF,
 } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { useLoader } from '@react-three/fiber';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
 import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
@@ -22,8 +21,30 @@ import { WorldTbaHud } from './WorldTbaHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
-  (import.meta.env.PUBLIC_PORTAL_MODEL_URL as string | undefined)?.trim() ||
-  '/models/portal.glb';
+  (import.meta.env.PUBLIC_PORTAL_MODEL_URL as string | undefined)?.trim() || '';
+
+function portalFallbackUrls(): string[] {
+  const out: string[] = [];
+  const primary = PORTAL_MODEL_URL.trim();
+  if (primary) out.push(primary);
+  if (primary.includes('arweave.net/')) out.push(primary.replace('arweave.net/', 'turbo-gateway.com/'));
+  out.push('/models/portal.glb');
+  return [...new Set(out)];
+}
+
+async function loadFirstPortalGltf(urls: string[]): Promise<{ url: string; scene: THREE.Object3D }> {
+  const loader = new GLTFLoader();
+  let lastErr: unknown = null;
+  for (const url of urls) {
+    try {
+      const gltf = await loader.loadAsync(url);
+      return { url, scene: (gltf as any).scene as THREE.Object3D };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('portal_glb_failed');
+}
 
 const WORLD_XZ_LIM = 46;
 
@@ -127,23 +148,58 @@ function PortalNeonGate() {
   );
 }
 
-class PortalErrorBoundary extends (globalThis as unknown as { React: { Component: any } }).React.Component<
-  { children: any; fallback: any },
+class PortalErrorBoundary extends Component<
+  { children: React.ReactNode; fallback: (err: Error) => React.ReactNode },
   { err: Error | null }
 > {
-  state = { err: null as Error | null };
+  state: { err: Error | null } = { err: null };
   static getDerivedStateFromError(err: Error) {
     return { err };
   }
+  componentDidCatch(err: Error) {
+    // Surface loader failures in dev tools.
+    // eslint-disable-next-line no-console
+    console.error('[portal-glb] failed to load', PORTAL_MODEL_URL, err);
+  }
   render() {
-    if (this.state.err) return this.props.fallback;
+    if (this.state.err) return this.props.fallback(this.state.err);
     return this.props.children;
   }
 }
 
 function PortalGlb() {
-  const gltf = useLoader(GLTFLoader, PORTAL_MODEL_URL);
-  const portalRoot = useMemo(() => SkeletonUtils.clone((gltf as any).scene), [gltf]);
+  const [rawScene, setRawScene] = useState<THREE.Object3D | null>(null);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<Error | null>(null);
+  const urlsKey = useMemo(() => portalFallbackUrls().join('|'), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRawScene(null);
+    setResolvedUrl(null);
+    setLoadErr(null);
+    void (async () => {
+      try {
+        const urls = portalFallbackUrls();
+        const r = await loadFirstPortalGltf(urls);
+        if (cancelled) return;
+        setResolvedUrl(r.url);
+        setRawScene(r.scene);
+      } catch (e) {
+        if (cancelled) return;
+        setLoadErr(e instanceof Error ? e : new Error('portal_glb_failed'));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlsKey]);
+
+  if (loadErr) throw loadErr;
+  if (!rawScene) return null;
+
+  const portalRoot = useMemo(() => SkeletonUtils.clone(rawScene), [rawScene]);
   const axes = useMemo(() => new THREE.AxesHelper(2), []);
 
   useLayoutEffect(() => {
@@ -177,17 +233,36 @@ function PortalGlb() {
       <ambientLight intensity={0.35} />
       <primitive object={portalRoot} />
       <primitive object={axes} />
+      {resolvedUrl ? (
+        <Html center position={[0, 3.35, 0]} transform>
+          <div className="pointer-events-none rounded-lg border border-zinc-700/50 bg-zinc-950/60 px-2 py-1 text-[9px] font-semibold text-zinc-300 backdrop-blur-sm">
+            portal: <span className="font-mono">{resolvedUrl.includes('/models/') ? 'local' : 'remote'}</span>
+          </div>
+        </Html>
+      ) : null}
     </group>
   );
 }
 
 function CyberRiftPortal() {
-  const fallback = (
+  const fallback = (err: Error) => (
     <>
       <PortalNeonGate />
       <Html center position={[PORTAL_X, GROUND_Y + 2.1, PORTAL_Z]} transform>
-        <div className="pointer-events-none max-w-[16rem] rounded-lg border border-amber-500/30 bg-zinc-950/75 px-3 py-2 text-[10px] font-semibold text-amber-200/90 backdrop-blur-sm">
-          Portal GLB not loaded. Check <span className="font-mono">PUBLIC_PORTAL_MODEL_URL</span>.
+        <div className="pointer-events-none w-[min(22rem,92vw)] rounded-lg border border-amber-500/30 bg-zinc-950/75 px-3 py-2 text-[10px] font-semibold text-amber-200/90 backdrop-blur-sm">
+          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
+            Portal GLB failed to load
+          </div>
+          <div className="mt-1 break-all text-amber-100/90">
+            URL: <span className="font-mono">{PORTAL_MODEL_URL}</span>
+          </div>
+          <div className="mt-1 break-words text-amber-200/80">
+            {err.message ? `Error: ${err.message}` : 'Error: unknown'}
+          </div>
+          <div className="mt-2 text-amber-200/70">
+            If you just edited <span className="font-mono">.env</span>, restart <span className="font-mono">astro dev</span> so
+            <span className="font-mono"> PUBLIC_PORTAL_MODEL_URL</span> is picked up.
+          </div>
         </div>
       </Html>
     </>
