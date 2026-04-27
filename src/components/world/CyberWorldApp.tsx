@@ -10,6 +10,7 @@ import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useState } fr
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
 import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
@@ -34,6 +35,11 @@ function portalFallbackUrls(): string[] {
 
 async function loadFirstPortalGltf(urls: string[]): Promise<{ url: string; scene: THREE.Object3D }> {
   const loader = new GLTFLoader();
+  // Portal GLB is Draco-compressed. Configure decoder or GLTFLoader will throw.
+  const draco = new DRACOLoader();
+  // Use the canonical hosted decoders (no local assets needed).
+  draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+  loader.setDRACOLoader(draco);
   let lastErr: unknown = null;
   for (const url of urls) {
     try {
