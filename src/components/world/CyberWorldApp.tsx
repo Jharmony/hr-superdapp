@@ -6,11 +6,9 @@ import {
   useGLTF,
 } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
 import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
@@ -22,35 +20,8 @@ import { WorldTbaHud } from './WorldTbaHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
-  (import.meta.env.PUBLIC_PORTAL_MODEL_URL as string | undefined)?.trim() || '';
-
-function portalFallbackUrls(): string[] {
-  const out: string[] = [];
-  const primary = PORTAL_MODEL_URL.trim();
-  if (primary) out.push(primary);
-  if (primary.includes('arweave.net/')) out.push(primary.replace('arweave.net/', 'turbo-gateway.com/'));
-  out.push('/models/portal.glb');
-  return [...new Set(out)];
-}
-
-async function loadFirstPortalGltf(urls: string[]): Promise<{ url: string; scene: THREE.Object3D }> {
-  const loader = new GLTFLoader();
-  // Portal GLB is Draco-compressed. Configure decoder or GLTFLoader will throw.
-  const draco = new DRACOLoader();
-  // Use the canonical hosted decoders (no local assets needed).
-  draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-  loader.setDRACOLoader(draco);
-  let lastErr: unknown = null;
-  for (const url of urls) {
-    try {
-      const gltf = await loader.loadAsync(url);
-      return { url, scene: (gltf as any).scene as THREE.Object3D };
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error('portal_glb_failed');
-}
+  (import.meta.env.PUBLIC_PORTAL_MODEL_URL as string | undefined)?.trim() ||
+  '/models/portal.glb';
 
 const WORLD_XZ_LIM = 46;
 
@@ -117,96 +88,9 @@ const CYBER_OBSTACLE_XZ: XZRect[] = [
   PORTAL_COLLIDER_XZ,
 ];
 
-function PortalNeonGate() {
-  return (
-    <group position={[PORTAL_X, GROUND_Y + 0.02, PORTAL_Z]}>
-      <pointLight position={[0, 2.8, 0]} intensity={10} distance={26} decay={1.9} color="#f0abfc" />
-      <mesh position={[0, 0.12, 0]} castShadow={false} receiveShadow={false}>
-        <sphereGeometry args={[0.18, 18, 18]} />
-        <meshStandardMaterial emissive="#a3e635" emissiveIntensity={1.2} color="#0a0a0a" />
-      </mesh>
-      <mesh position={[0, 1.35, 0]} castShadow receiveShadow>
-        <boxGeometry args={[3.1, 3.0, 0.45]} />
-        <meshStandardMaterial
-          color="#07070a"
-          emissive="#d946ef"
-          emissiveIntensity={0.85}
-          metalness={0.25}
-          roughness={0.35}
-        />
-      </mesh>
-      <mesh position={[0, 1.35, 0.03]} castShadow={false} receiveShadow={false}>
-        <boxGeometry args={[2.25, 2.25, 0.1]} />
-        <meshStandardMaterial
-          color="#000000"
-          emissive="#22d3ee"
-          emissiveIntensity={0.55}
-          transparent
-          opacity={0.22}
-        />
-      </mesh>
-      <Html center position={[0, 2.85, 0]} transform>
-        <div className="pointer-events-none rounded-lg border border-fuchsia-500/35 bg-zinc-950/75 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-200/90 backdrop-blur-sm">
-          Rift portal
-        </div>
-      </Html>
-    </group>
-  );
-}
-
-class PortalErrorBoundary extends Component<
-  { children: React.ReactNode; fallback: (err: Error) => React.ReactNode },
-  { err: Error | null }
-> {
-  state: { err: Error | null } = { err: null };
-  static getDerivedStateFromError(err: Error) {
-    return { err };
-  }
-  componentDidCatch(err: Error) {
-    // Surface loader failures in dev tools.
-    // eslint-disable-next-line no-console
-    console.error('[portal-glb] failed to load', PORTAL_MODEL_URL, err);
-  }
-  render() {
-    if (this.state.err) return this.props.fallback(this.state.err);
-    return this.props.children;
-  }
-}
-
-function PortalGlb() {
-  const [rawScene, setRawScene] = useState<THREE.Object3D | null>(null);
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
-  const [loadErr, setLoadErr] = useState<Error | null>(null);
-  const urlsKey = useMemo(() => portalFallbackUrls().join('|'), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setRawScene(null);
-    setResolvedUrl(null);
-    setLoadErr(null);
-    void (async () => {
-      try {
-        const urls = portalFallbackUrls();
-        const r = await loadFirstPortalGltf(urls);
-        if (cancelled) return;
-        setResolvedUrl(r.url);
-        setRawScene(r.scene);
-      } catch (e) {
-        if (cancelled) return;
-        setLoadErr(e instanceof Error ? e : new Error('portal_glb_failed'));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlsKey]);
-
-  if (loadErr) throw loadErr;
-  if (!rawScene) return null;
-
-  const portalRoot = useMemo(() => SkeletonUtils.clone(rawScene), [rawScene]);
-  const axes = useMemo(() => new THREE.AxesHelper(2), []);
+function CyberRiftPortal() {
+  const gltf = useGLTF(PORTAL_MODEL_URL);
+  const portalRoot = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
 
   useLayoutEffect(() => {
     const root = portalRoot;
@@ -236,55 +120,15 @@ function PortalGlb() {
 
   return (
     <group position={[PORTAL_X, GROUND_Y, PORTAL_Z]}>
-      <ambientLight intensity={0.35} />
+      <pointLight
+        position={[0, 4.2, 0]}
+        intensity={8}
+        distance={22}
+        decay={1.85}
+        color="#f0abfc"
+      />
       <primitive object={portalRoot} />
-      <primitive object={axes} />
-      {resolvedUrl ? (
-        <Html center position={[0, 3.35, 0]} transform>
-          <div className="pointer-events-none rounded-lg border border-zinc-700/50 bg-zinc-950/60 px-2 py-1 text-[9px] font-semibold text-zinc-300 backdrop-blur-sm">
-            portal: <span className="font-mono">{resolvedUrl.includes('/models/') ? 'local' : 'remote'}</span>
-          </div>
-        </Html>
-      ) : null}
     </group>
-  );
-}
-
-function CyberRiftPortal() {
-  const fallback = (err: Error) => (
-    <>
-      <PortalNeonGate />
-      <Html center position={[PORTAL_X, GROUND_Y + 2.1, PORTAL_Z]} transform>
-        <div className="pointer-events-none w-[min(22rem,92vw)] rounded-lg border border-amber-500/30 bg-zinc-950/75 px-3 py-2 text-[10px] font-semibold text-amber-200/90 backdrop-blur-sm">
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
-            Portal GLB failed to load
-          </div>
-          <div className="mt-1 break-all text-amber-100/90">
-            URL: <span className="font-mono">{PORTAL_MODEL_URL}</span>
-          </div>
-          <div className="mt-1 break-words text-amber-200/80">
-            {err.message ? `Error: ${err.message}` : 'Error: unknown'}
-          </div>
-          <div className="mt-2 text-amber-200/70">
-            If you just edited <span className="font-mono">.env</span>, restart <span className="font-mono">astro dev</span> so
-            <span className="font-mono"> PUBLIC_PORTAL_MODEL_URL</span> is picked up.
-          </div>
-        </div>
-      </Html>
-    </>
-  );
-
-  return (
-    <>
-      {/* Always visible “gate” so the portal never disappears */}
-      <PortalNeonGate />
-      {/* GLB layered on top once loaded */}
-      <PortalErrorBoundary fallback={fallback}>
-        <Suspense fallback={null}>
-          <PortalGlb />
-        </Suspense>
-      </PortalErrorBoundary>
-    </>
   );
 }
 
