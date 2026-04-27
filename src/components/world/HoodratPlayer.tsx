@@ -591,7 +591,9 @@ export function HoodratPlayer({
       if (footGroundSnapFrameRef.current >= 10) {
         visualRef.current.updateMatrixWorld(true);
         _footAlignBox.makeEmpty();
-        _footAlignBox.setFromObject(visualRef.current, true);
+        // Measure only the main rig — `visualRef` also contains the companion, and its bbox
+        // would skew `min.y` and push the main character vertically by a bogus `err`.
+        _footAlignBox.setFromObject(worldScene, true);
         if (!_footAlignBox.isEmpty()) {
           const targetSoleY = terrainGround
             ? floorAt(p.x, p.z, p.y) - footSkinEpsilon
@@ -599,8 +601,6 @@ export function HoodratPlayer({
           const err = targetSoleY - _footAlignBox.min.y;
           if (Number.isFinite(err) && Math.abs(err) < 6) {
             worldScene.position.y += err;
-            // Keep companion feet aligned with the same ground snap correction.
-            companionBaseYRef.current += err;
           }
         }
         footGroundSnapDoneRef.current = true;
