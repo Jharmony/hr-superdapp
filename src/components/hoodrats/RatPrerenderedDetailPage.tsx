@@ -8,6 +8,7 @@ import { RatTokenExplorerCard } from './RatTokenExplorerCard';
 import { TbaBackpackPanel } from './TbaBackpackPanel';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
+import { IframeWithFallback } from '../media/IframeWithFallback';
 
 type Props = {
   tokenId: number;
@@ -66,13 +67,10 @@ export function RatPrerenderedDetailPage({
           {anim ? (
             <>
               <div className="relative mx-auto aspect-square w-full overflow-hidden bg-black">
-                <iframe
+                <IframeWithFallback
                   title={`Tokenbound ${tokenId}`}
                   src={anim}
                   className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
-                  loading="lazy"
-                  allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
-                  referrerPolicy="no-referrer"
                 />
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs">

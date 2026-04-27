@@ -13,6 +13,7 @@ import { HomeFooter } from '../home/HomeFooter';
 import { RatTokenExplorerCard } from './RatTokenExplorerCard';
 import { TraitHoodratPreview } from './TraitHoodratPreview';
 import { FallbackImage } from '../media/FallbackImage';
+import { IframeWithFallback } from '../media/IframeWithFallback';
 
 function parseIdFromSearch(): number | null {
   if (typeof window === 'undefined') return null;
@@ -163,12 +164,10 @@ function RatDetailContent({ tokenId }: { tokenId: number }) {
             <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-black shadow-2xl">
               {anim ? (
                 <div className="relative mx-auto aspect-square w-full overflow-hidden bg-black">
-                  <iframe
+                  <IframeWithFallback
                     title={`Tokenbound ${tokenId}`}
                     src={anim}
                     className="absolute inset-0 h-full w-full border-0 bg-black [color-scheme:dark]"
-                    loading="lazy"
-                    allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
                   />
                 </div>
               ) : img ? (
