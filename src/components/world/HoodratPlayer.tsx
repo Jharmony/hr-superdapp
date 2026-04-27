@@ -334,7 +334,11 @@ export function HoodratPlayer({
       c.position.set(0, 0, 0);
       c.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(c);
-      c.position.y = -box.min.y - feetSink;
+      // Main rat `feetSink` can be large in UR (street / GLB alignment). The pet is parented to
+      // the main rig with a small local offset — reusing that sink would shove the mesh meters
+      // below the feet and it reads as “companion never loads” in the rift.
+      const companionSoleSink = Math.min(feetSink, CYBER_FEET_SINK);
+      c.position.y = -box.min.y - companionSoleSink;
       companionBaseYRef.current = c.position.y;
       // Root-motion is often authored on hips/root bones. Cache all likely candidates and clamp X/Z.
       const roots: { bone: THREE.Bone; base: { x: number; y: number; z: number } }[] = [];
