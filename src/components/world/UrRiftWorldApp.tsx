@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { HoodratPlayer } from './HoodratPlayer';
 import { WorldTbaHud } from './WorldTbaHud';
+import { WorldWalletHud } from './WorldWalletHud';
 import { circleIntersectsObstacle, type XZRect } from './collision';
 import { GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
@@ -593,6 +594,7 @@ function UrRiftWorldExperience() {
       </div>
 
       <WorldTbaHud activeTokenId={activeTokenId} />
+      <WorldWalletHud />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary

@@ -17,6 +17,7 @@ import { Web3Providers } from '../web3/Web3Providers';
 import type { XZRect } from './collision';
 import { HoodratPlayer } from './HoodratPlayer';
 import { WorldTbaHud } from './WorldTbaHud';
+import { WorldWalletHud } from './WorldWalletHud';
 import { CAM_DIST, CAM_HEIGHT, GROUND_Y, keyMap, PLAYER_RADIUS } from './worldConstants';
 
 const PORTAL_MODEL_URL =
@@ -339,6 +340,7 @@ function CyberWorldExperience() {
       </div>
 
       <WorldTbaHud activeTokenId={activeTokenId} />
+      <WorldWalletHud />
 
       <div className="h-full w-full pt-14 md:pt-0">
         <AppErrorBoundary
