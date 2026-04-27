@@ -561,18 +561,10 @@ export function HoodratPlayer({
     if (cg && companionScene) {
       cg.visible = !firstPersonRef.current;
       if (cg.visible) {
-        const ry = visualRef.current?.rotation.y ?? 0;
-        const sinY = Math.sin(ry);
-        const cosY = Math.cos(ry);
-        const rightX = cosY;
-        const rightZ = -sinY;
         cg.scale.setScalar(modelScale * 0.33);
-        cg.position.set(
-          p.x + rightX * 0.72,
-          p.y,
-          p.z + rightZ * 0.72,
-        );
-        cg.rotation.y = ry;
+        // Companion is parented under `visualRef` (rotates with the main rat),
+        // so we only need a fixed local offset near the right foot.
+        cg.position.set(0.64, 0, 0.06);
       }
     }
 
@@ -644,18 +636,12 @@ export function HoodratPlayer({
       camera.lookAt(p.x, p.y + 1.05, p.z);
     }
 
-    // Key light: sits near camera and aims at the player so the rat reads clearly.
+    // Key light: sits at the camera and aims at the player so the rat reads clearly.
     const key = keyLightRef.current;
     const kt = keyTargetRef.current;
     if (key && kt) {
-      camera.getWorldDirection(tmpFwd);
-      tmpFwd.normalize();
-      key.position.set(
-        camera.position.x + tmpFwd.x * 0.35,
-        camera.position.y + 0.15,
-        camera.position.z + tmpFwd.z * 0.35,
-      );
-      kt.position.set(p.x, p.y + 1.05, p.z);
+      key.position.set(camera.position.x - p.x, camera.position.y - p.y + 0.12, camera.position.z - p.z);
+      kt.position.set(0, 1.05, 0);
     }
   });
 
@@ -708,8 +694,8 @@ export function HoodratPlayer({
       />
       <group ref={visualRef}>
         <primitive object={worldScene} />
+        <group ref={companionGroupRef} />
       </group>
-      <group ref={companionGroupRef} />
     </group>
   );
 }
