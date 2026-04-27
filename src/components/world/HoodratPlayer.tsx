@@ -41,7 +41,7 @@ const COMPANION_LOCAL_Y = -0.88;
 const COMPANION_LOCAL_Z = -0.02;
 
 /** UR rift only: `terrainGround` is set; lift pet in body space so knees/feet read on the street. Cyber omits `terrainGround` — unchanged. */
-const UR_RIFT_COMPANION_LOCAL_Y_LIFT = 0.16;
+const UR_RIFT_COMPANION_LOCAL_Y_LIFT = 0.26;
 
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
 
