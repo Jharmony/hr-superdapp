@@ -492,7 +492,11 @@ function UrWorldScene({
       >
         {bounds ? (
           <HoodratPlayer
-            key={`${bounds.worldXZLim}-${bounds.obstacles.length}-${traitAttributes === undefined ? 'd' : JSON.stringify(traitAttributes)}-${companionTraitAttributes === undefined ? 'c0' : JSON.stringify(companionTraitAttributes)}`}
+            // Do not key on stringified traits: companion metadata often resolves after the
+            // rift GLB sets `bounds`; remounting the whole player on that update can leave the pet
+            // missing. Cyber district omits this key — trait / companion scenes update inside
+            // `HoodratPlayer` via `useMemo` instead.
+            key={`${bounds.worldXZLim}-${bounds.obstacles.length}`}
             onLockChange={onLockChange}
             onViewModeChange={onViewModeChange}
             obstacleRects={bounds.obstacles}
