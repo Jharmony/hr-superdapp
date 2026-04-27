@@ -92,6 +92,10 @@ function PortalNeonGate() {
   return (
     <group position={[PORTAL_X, GROUND_Y + 0.02, PORTAL_Z]}>
       <pointLight position={[0, 2.8, 0]} intensity={10} distance={26} decay={1.9} color="#f0abfc" />
+      <mesh position={[0, 0.12, 0]} castShadow={false} receiveShadow={false}>
+        <sphereGeometry args={[0.18, 18, 18]} />
+        <meshStandardMaterial emissive="#a3e635" emissiveIntensity={1.2} color="#0a0a0a" />
+      </mesh>
       <mesh position={[0, 1.35, 0]} castShadow receiveShadow>
         <boxGeometry args={[3.1, 3.0, 0.45]} />
         <meshStandardMaterial
@@ -112,6 +116,11 @@ function PortalNeonGate() {
           opacity={0.22}
         />
       </mesh>
+      <Html center position={[0, 2.85, 0]} transform>
+        <div className="pointer-events-none rounded-lg border border-fuchsia-500/35 bg-zinc-950/75 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-200/90 backdrop-blur-sm">
+          Rift portal
+        </div>
+      </Html>
     </group>
   );
 }
