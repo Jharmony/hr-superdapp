@@ -8,6 +8,7 @@ import {
   disposeColoredHoodratScene,
 } from '../../lib/hoodratTraitApplyThree';
 import type { TraitAttr } from '../../lib/traitVisual';
+import { preferTurboGatewayUrl } from '../../lib/arweaveGateways';
 import { resolvePlayerXZ, type XZRect } from './collision';
 import { sampleWalkableTerrainY } from './urTerrainGround';
 import {
@@ -31,7 +32,7 @@ import {
 } from './worldConstants';
 
 const MODEL_URL =
-  (import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() ||
+  preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';

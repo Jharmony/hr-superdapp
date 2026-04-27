@@ -6,9 +6,10 @@ import {
   disposeColoredHoodratScene,
 } from './hoodratTraitApplyThree';
 import type { TraitAttr } from './traitVisual';
+import { preferTurboGatewayUrl } from './arweaveGateways';
 
 const MODEL_URL =
-  (import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() ||
+  preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
 let baseGltfPromise: Promise<GLTF> | null = null;

@@ -60,3 +60,34 @@ export function arweaveFallbackUrls(raw: string): string[] {
   ]);
 }
 
+/** Prefer Turbo gateway for Arweave-like URLs (more reliable for GLBs). */
+export function preferTurboGatewayUrl(raw: string): string {
+  const input = raw.trim();
+  if (!input) return input;
+  let url: URL | null = null;
+  try {
+    url = new URL(input);
+  } catch {
+    return input;
+  }
+  const host = url.hostname.toLowerCase();
+  if (
+    host === 'arweave.net' ||
+    host === 'www.arweave.net' ||
+    host.endsWith('.arweave.net') ||
+    host === 'arweave.dev' ||
+    host === 'www.arweave.dev' ||
+    host.endsWith('.arweave.dev') ||
+    host === 'ar-io.net' ||
+    host === 'www.ar-io.net' ||
+    host.endsWith('.ar-io.net') ||
+    host === 'g8way.io' ||
+    host === 'www.g8way.io' ||
+    host.endsWith('.g8way.io')
+  ) {
+    url.hostname = 'turbo-gateway.com';
+    return url.toString();
+  }
+  return input;
+}
+

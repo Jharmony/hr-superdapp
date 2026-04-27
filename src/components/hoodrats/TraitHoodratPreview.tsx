@@ -15,9 +15,10 @@ import {
   disposeColoredHoodratScene,
 } from '../../lib/hoodratTraitApplyThree';
 import type { TraitAttr } from '../../lib/traitVisual';
+import { preferTurboGatewayUrl } from '../../lib/arweaveGateways';
 
 const MODEL_URL =
-  (import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() ||
+  preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
 function resolveClips(animations: AnimationClip[]) {
