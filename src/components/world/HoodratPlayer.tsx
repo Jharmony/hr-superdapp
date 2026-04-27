@@ -35,6 +35,11 @@ const MODEL_URL =
   preferTurboGatewayUrl((import.meta.env.PUBLIC_HOODRATS_MODEL_URL as string | undefined)?.trim() || '') ||
   '/models/hoodrats.glb';
 
+/** Local offset under `visualRef` (rat’s body space): right + down so the pet’s feet read on the ground. */
+const COMPANION_LOCAL_X = 0.9;
+const COMPANION_LOCAL_Y = -0.36;
+const COMPANION_LOCAL_Z = 0.05;
+
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
 
 type ResolvedClips = {
@@ -571,7 +576,7 @@ export function HoodratPlayer({
         cg.scale.setScalar(modelScale * 0.33);
         // Companion is parented under `visualRef` (rotates with the main rat),
         // so we only need a fixed local offset near the right foot.
-        cg.position.set(0.64, 0, 0.06);
+        cg.position.set(COMPANION_LOCAL_X, COMPANION_LOCAL_Y, COMPANION_LOCAL_Z);
       }
     }
 
