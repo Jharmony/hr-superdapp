@@ -29,9 +29,9 @@ export function IframeWithFallback({
         title={title}
         src={src}
         className={className}
-        loading="lazy"
-        allow="clipboard-read; clipboard-write; accelerometer; gyroscope"
-        referrerPolicy="no-referrer"
+        // Match prior behavior as closely as possible; some embeds are sensitive to referrer policy.
+        loading="eager"
+        allow="clipboard-read; clipboard-write; accelerometer; gyroscope; fullscreen"
         onLoad={() => {
           setLoaded(true);
           if (timerRef.current) window.clearTimeout(timerRef.current);
