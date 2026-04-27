@@ -40,6 +40,9 @@ const COMPANION_LOCAL_X = 0.96;
 const COMPANION_LOCAL_Y = -0.88;
 const COMPANION_LOCAL_Z = -0.02;
 
+/** UR rift only: `terrainGround` is set; lift pet in body space so knees/feet read on the street. Cyber omits `terrainGround` — unchanged. */
+const UR_RIFT_COMPANION_LOCAL_Y_LIFT = 0.16;
+
 type LocoMode = 'idle' | 'walk' | 'run' | 'jump';
 
 type ResolvedClips = {
@@ -580,7 +583,9 @@ export function HoodratPlayer({
         cg.scale.setScalar(modelScale * 0.33);
         // Companion is parented under `visualRef` (rotates with the main rat),
         // so we only need a fixed local offset near the right foot.
-        cg.position.set(COMPANION_LOCAL_X, COMPANION_LOCAL_Y, COMPANION_LOCAL_Z);
+        const companionY =
+          COMPANION_LOCAL_Y + (terrainGround ? UR_RIFT_COMPANION_LOCAL_Y_LIFT : 0);
+        cg.position.set(COMPANION_LOCAL_X, companionY, COMPANION_LOCAL_Z);
       }
     }
 
