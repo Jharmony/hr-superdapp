@@ -9,6 +9,8 @@ import { Canvas } from '@react-three/fiber';
 import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { useLoader } from '@react-three/fiber';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { useActiveHoodratTraitAttributes } from '../../hooks/useActiveHoodratTraitAttributes';
 import { useBackpackWorldVisuals } from '../../hooks/useBackpackWorldVisuals';
@@ -125,9 +127,24 @@ function PortalNeonGate() {
   );
 }
 
+class PortalErrorBoundary extends (globalThis as unknown as { React: { Component: any } }).React.Component<
+  { children: any; fallback: any },
+  { err: Error | null }
+> {
+  state = { err: null as Error | null };
+  static getDerivedStateFromError(err: Error) {
+    return { err };
+  }
+  render() {
+    if (this.state.err) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
 function PortalGlb() {
-  const gltf = useGLTF(PORTAL_MODEL_URL);
-  const portalRoot = useMemo(() => SkeletonUtils.clone(gltf.scene), [gltf.scene]);
+  const gltf = useLoader(GLTFLoader, PORTAL_MODEL_URL);
+  const portalRoot = useMemo(() => SkeletonUtils.clone((gltf as any).scene), [gltf]);
+  const axes = useMemo(() => new THREE.AxesHelper(2), []);
 
   useLayoutEffect(() => {
     const root = portalRoot;
@@ -157,20 +174,35 @@ function PortalGlb() {
 
   return (
     <group position={[PORTAL_X, GROUND_Y, PORTAL_Z]}>
+      <ambientLight intensity={0.35} />
       <primitive object={portalRoot} />
+      <primitive object={axes} />
     </group>
   );
 }
 
 function CyberRiftPortal() {
+  const fallback = (
+    <>
+      <PortalNeonGate />
+      <Html center position={[PORTAL_X, GROUND_Y + 2.1, PORTAL_Z]} transform>
+        <div className="pointer-events-none max-w-[16rem] rounded-lg border border-amber-500/30 bg-zinc-950/75 px-3 py-2 text-[10px] font-semibold text-amber-200/90 backdrop-blur-sm">
+          Portal GLB not loaded. Check <span className="font-mono">PUBLIC_PORTAL_MODEL_URL</span>.
+        </div>
+      </Html>
+    </>
+  );
+
   return (
     <>
       {/* Always visible “gate” so the portal never disappears */}
       <PortalNeonGate />
       {/* GLB layered on top once loaded */}
-      <Suspense fallback={null}>
-        <PortalGlb />
-      </Suspense>
+      <PortalErrorBoundary fallback={fallback}>
+        <Suspense fallback={null}>
+          <PortalGlb />
+        </Suspense>
+      </PortalErrorBoundary>
     </>
   );
 }
