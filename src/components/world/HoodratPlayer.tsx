@@ -44,10 +44,17 @@ type ResolvedClips = {
   jump: string | undefined;
 };
 
+function isBindPoseClipName(name: string): boolean {
+  return /\b(tpose|tp\s*pose|t-pose|bind\s*pose|a\s*pose|reference)\b/i.test(name);
+}
+
 function resolveClips(animations: THREE.AnimationClip[]): ResolvedClips {
   const match = (re: RegExp) => animations.find((c) => re.test(c.name))?.name;
+  const firstNonBindClipName = () =>
+    animations.find((c) => !isBindPoseClipName(c.name))?.name ?? animations[0]?.name;
   return {
-    idle: match(/\b(idle|stand|breath|tpose)\b/i) ?? animations[0]?.name,
+    // Never treat T-pose / bind clips as locomotion “idle” — that locks the rig in T-pose.
+    idle: match(/\b(idle|stand|breath)\b/i) ?? firstNonBindClipName(),
     walk: match(/\bwalk(ing)?\b/i),
     run: match(/\brun(ning)?\b/i),
     jump: match(/\bjump(ing)?\b/i),
